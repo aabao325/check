@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>检测报告</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css?v=2">
+  <!-- html2canvas 用于导出 PNG。CDN 加载失败时 PNG 按钮会提示，不影响查看。 -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex;gap:10px;justify-content:flex-end;margin-bottom:10px">
+    <button class="btn btn-ghost btn-sm" id="pngBtn">📷 导出 PNG 图片</button>
+    <button class="btn btn-ghost btn-sm" id="copyBtn">🔗 复制本页链接</button>
+    <a class="btn btn-primary btn-sm" href="index.html" style="text-decoration:none">↩ 去检测</a>
+  </div>
+
+  <!-- 需要被截图的报告区域 -->
+  <div id="reportArea">
+    <!-- 品牌条 -->
+    <div class="brand-bar" id="brandBar">
+      <div>
+        <div class="bname" id="brandName">AI 检测站</div>
+        <div class="bslogan" id="brandSlogan">一键鉴别 Claude / OpenAI / Gemini 中转站真伪</div>
+      </div>
+      <div style="text-align:right">
+        <div class="muted" style="font-size:12px" id="reportMeta">检测报告</div>
+        <a id="brandUrl" href="#" target="_blank" style="font-size:13px;font-weight:600"></a>
+      </div>
+    </div>
+
+    <!-- 总览 -->
+    <div class="card">
+      <div class="overview">
+        <div class="ring" id="ring"><div class="inner"><div class="score" id="ringScore">--</div><div class="lab">综合分</div></div></div>
+        <div class="ov-main">
+          <div class="verdict" id="ovVerdict">—</div>
+          <div>渠道来源：<span class="badge unknown" id="ovChannel">未知</span></div>
+          <div class="muted" id="ovModel" style="font-size:12px;margin-top:4px"></div>
+        </div>
+      </div>
+      <div class="crit-banner" id="critBanner" style="display:none">🔴 命中严重异常（疑似套壳/冒充），综合评级已封顶。</div>
+      <div class="summary-box" id="summaryBox" style="display:none;margin-top:14px"></div>
+    </div>
+
+    <!-- 探针明细 -->
+    <div id="cards"></div>
+
+    <!-- 页脚广告 -->
+    <div class="report-footer" id="reportFooter"></div>
+  </div>
+</div>
+
+<script src="assets/report.js?v=2" type="module"></script>
+</body>
+</html>

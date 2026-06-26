@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>御三家 API 真伪检测站 · 公益本地运行</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css?v=3">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 顶栏：显眼标题（公益定位） -->
+  <div class="topbar">
+    <div>
+      <h1>🛡️ 御三家 API <span class="accent">真伪检测站</span></h1>
+      <div class="sub">一键鉴别 Claude / OpenAI / Gemini 中转站真伪 —— 掺假冒充、协议篡改、能力降级、隐藏提示词注入，逐项可见、有理有据。</div>
+    </div>
+    <a class="btn btn-ghost btn-sm" href="../">↩ 返回主页</a>
+  </div>
+
+  <!-- 公益本地运行说明（第5b：仿 veridrop） -->
+  <div class="local-banner">
+    <span class="ico">🔒</span>
+    <span>
+      这是一个<b>公益的、在你浏览器本地运行</b>的 API 真伪检测站。所有特征判定逻辑<b>全部开源、运行在本地前端</b>；
+      我们<b>不在云端保存你的 API Key 或检测数据</b>，请求记录仅存于你本地浏览器。
+      （请求经一个轻量代理转发仅为绕过浏览器跨域限制，<b>不落库</b>；只有当你主动点「分享报告」时，报告才会上传以生成分享链接。）
+    </span>
+  </div>
+
+  <!-- 协议切换（两视图共享） -->
+  <div class="proto-tabs" id="protoTabs"></div>
+
+  <!-- 输入区（两视图共享：模型 / 接口 / Key / 深度 / 高级设置） -->
+  <div class="card">
+    <div class="row">
+      <div class="field" style="flex:2">
+        <label>接口地址</label>
+        <input id="endpoint" placeholder="https://你的中转站/v1/messages">
+      </div>
+      <div class="field">
+        <label>模型名</label>
+        <input id="model" placeholder="claude-opus-4-8">
+      </div>
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input id="apiKey" type="password" placeholder="sk-...（仅在你本地与代理之间使用，不保存）">
+    </div>
+
+    <div class="field" id="modeRow">
+      <label>检测深度</label>
+      <div class="mode-btns" id="modeBtns">
+        <button class="mode-btn" data-mode="Q">快速（核心几项）</button>
+        <button class="mode-btn active" data-mode="S">标准（推荐）</button>
+        <button class="mode-btn" data-mode="F">完整（含长上下文，耗费高）</button>
+      </div>
+    </div>
+
+    <div class="field" id="scenarioRow">
+      <label>场景预设（仅 Claude）</label>
+      <div class="mode-btns" id="scenarioBtns"></div>
+    </div>
+
+    <details class="adv">
+      <summary>🔧 自定义检测项与高级设置</summary>
+      <div style="margin-top:12px">
+        <div class="field" id="betaRow">
+          <label>anthropic-beta 头</label>
+          <input id="betaHeader" placeholder="context-management-2025-06-27,...">
+        </div>
+        <div class="field" id="probeToggleRow">
+          <label>勾选要运行的检测项（按检测深度自动预选，专业用户可微调）</label>
+          <div class="probe-toggles" id="probeToggles"></div>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- 视图切换：自动检测 / 手动检测 -->
+  <div class="view-switch" id="viewSwitch">
+    <button data-view="main" class="active">⚡ 自动检测</button>
+    <button data-view="offline">🛠️ 手动检测</button>
+  </div>
+
+  <!-- ============ 视图 1：自动检测 ============ -->
+  <div class="view active" id="view-main">
+
+    <div class="card">
+      <div class="muted" style="font-size:13px;margin-bottom:12px">
+        填好上方接口地址与 API Key，点「开始检测」即可<b>自动发起整套探针请求</b>并逐项给出真伪判定。
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="runBtn">🟢 开始检测</button>
+        <button class="btn btn-ghost" id="summaryBtn">🤖 生成 AI 总结</button>
+        <button class="btn btn-ghost" id="shareBtn">🔗 分享报告</button>
+      </div>
+    </div>
+
+    <!-- 总览 -->
+    <div class="card" id="overview" style="display:none">
+      <div class="overview">
+        <div class="ring" id="ring"><div class="inner"><div class="score" id="ringScore">--</div><div class="lab">综合分</div></div></div>
+        <div class="ov-main">
+          <div class="verdict" id="ovVerdict">等待检测</div>
+          <div>渠道来源：<span class="badge unknown" id="ovChannel">未知</span></div>
+          <div class="crit-banner" id="critBanner" style="display:none">🔴 命中严重异常（疑似套壳/冒充），综合评级已封顶。请重点查看下方标红项。</div>
+        </div>
+      </div>
+      <div class="summary-box" id="summaryBox" style="display:none;margin-top:14px"></div>
+    </div>
+
+    <!-- 探针卡片 -->
+    <div id="cards"></div>
+  </div>
+
+  <!-- ============ 视图 2：手动检测 ============ -->
+  <div class="view" id="view-offline">
+    <div class="card">
+      <h2>🛠️ 自由请求 / 手动核对</h2>
+      <div class="muted" style="font-size:13px;margin-bottom:12px">
+        「手动检测」适合你<b>已经有一段响应</b>、不需要自动发请求：直接把响应 JSON 粘到右侧点「分析请求」，
+        即可识别渠道与特征（适合核对官方样本）。也可在左侧任意编写请求体后「发送」（用上方填好的接口地址与 Key），等价于一个内置特征识别的迷你 Apifox。
+      </div>
+      <div class="pc-io">
+        <div class="col">
+          <label>📤 自定义请求体 <button class="btn btn-ghost btn-sm" id="freeSend">发送</button></label>
+          <textarea id="freeReq" spellcheck="false" style="height:220px"></textarea>
+        </div>
+        <div class="col">
+          <label>📥 响应体（可直接粘贴） <button class="btn btn-ghost btn-sm" id="freeAnalyze">分析请求</button></label>
+          <textarea id="freeResp" spellcheck="false" style="height:220px"></textarea>
+        </div>
+      </div>
+      <div class="pc-analysis" id="freeAnalysis" style="display:none;margin-top:12px">
+        <div class="feats"><div class="feat-title">🔍 特征提取</div><ul></ul></div>
+        <div class="diffs"><div class="feat-title">⚠️ 差异</div><ul></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 检测项说明（默认折叠） ============ -->
+  <div class="card">
+    <details id="probeDocsDetails">
+      <summary><h2 style="display:inline;">📖 检测项说明</h2> <span class="muted" id="probeCount"></span></summary>
+      <div class="faq-sub">想知道每一档都检测了什么？下面列出当前协议的全部检测项与权重（权重越高，对真伪判定影响越大）。</div>
+      <div id="probeDocs"></div>
+    </details>
+  </div>
+
+  <!-- ============ 常见问题 ============ -->
+  <div class="card faq">
+    <h2>❓ 常见问题</h2>
+
+    <div class="faq-q">为什么有「快速 / 标准 / 完整」三档？</div>
+    <div class="faq-a">不同档位运行不同数量的检测项：快速只跑最核心几项、标准覆盖绝大多数、完整额外加上耗时较高的长上下文真实性等。深度越高越准，但耗费的 token 也越多。</div>
+
+    <div class="faq-q">智商 / 推理题能反馈或新增吗？</div>
+    <div class="faq-a">题库由站点统一维护、写死在代码里（不开放用户自行添加，以防被针对性「刷题」绕过）；但<b>非常欢迎反馈题目建议</b>，请到开源仓库提 <a id="faqIssueLink" href="#" target="_blank" rel="noopener">GitHub Issue</a>。</div>
+
+    <div class="faq-q">我的 API Key 安全吗？</div>
+    <div class="faq-a">Key 只在你本地浏览器与转发代理之间使用，<b>不写入任何数据库</b>。代理仅做一次性转发以绕过浏览器跨域限制。介意的话也可以用「手动检测」：完全不发请求，只分析你贴进来的响应。</div>
+  </div>
+
+  <!-- ============ 页脚：透明度声明 / 致谢 / 开源（第5c） ============ -->
+  <div class="site-foot">
+    <div class="foot-row">
+      <a id="repoLink" href="#" target="_blank" rel="noopener">⭐ 开源仓库（GitHub）</a>
+      <a id="issueLink" href="#" target="_blank" rel="noopener">💬 反馈 / 提 Issue</a>
+      <span class="muted" id="brandFoot"></span>
+    </div>
+    <div class="transparency">
+      <b>透明度声明：</b>本站特征判定逻辑<b>全部前端开源、本地运行，不保存你的 Key 与检测数据</b>。
+      <br>
+      <b>致谢：</b>思路参考并致谢开源项目
+      <a href="https://github.com/canarybyte/veridrop" target="_blank" rel="noopener">veridrop</a> 与
+      <a href="https://github.com/7836246/claude-detector" target="_blank" rel="noopener">claude-detector</a>。本站为公益项目，不对检测结论作任何担保，仅供自查参考。
+    </div>
+  </div>
+</div>
+
+<script src="assets/app.js?v=3" type="module"></script>
+</body>
+</html>

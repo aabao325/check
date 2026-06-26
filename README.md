@@ -154,6 +154,10 @@ check/
 
 ## 🚀 快速开始
 
+```bash
+git clone https://github.com/aabao325/check.git
+```
+
 ### 方式一：宝塔面板（推荐，全程图形界面）
 
 1. **建站**：宝塔 →【网站】→【添加站点】，PHP 版本选 **7.4 或以上**，把整个 `check/` 目录上传到站点根目录。
@@ -190,7 +194,7 @@ const SITE_URL    = 'https://your-site.example.com';
 const SITE_SLOGAN = '一键鉴别 Claude / OpenAI / Gemini 中转站真伪';
 ```
 
-> 此外，前端 `assets/app.js` 顶部的 `REPO_URL` / `ISSUE_URL` 可替换为你的真实开源仓库地址（用于页脚链接与「反馈题目」入口）。
+> 此外，前端 `assets/app.js` 顶部的 `REPO_URL` / `ISSUE_URL` 已配置为本仓库地址（用于页脚链接与「反馈题目」入口）；如需 fork 自用可改为你的仓库。
 
 ---
 

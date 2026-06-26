@@ -154,6 +154,10 @@ check/
 
 ## 🚀 Quick Start
 
+```bash
+git clone https://github.com/aabao325/check.git
+```
+
 ### Option A: aaPanel (recommended, fully GUI)
 
 1. **Create site**: aaPanel → **Website** → **Add site**, choose PHP **7.4+**, upload the entire `check/` directory to the site root.
@@ -190,7 +194,7 @@ const SITE_URL    = 'https://your-site.example.com';
 const SITE_SLOGAN = 'One-click verification of Claude / OpenAI / Gemini relays';
 ```
 
-> In addition, `REPO_URL` / `ISSUE_URL` at the top of `assets/app.js` can be replaced with your real repository URL (used for footer links and the "suggest a question" entry).
+> In addition, `REPO_URL` / `ISSUE_URL` at the top of `assets/app.js` are already set to this repository (used for footer links and the "suggest a question" entry); change them to your own if you fork.
 
 ---
 

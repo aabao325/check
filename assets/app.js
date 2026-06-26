@@ -10,8 +10,8 @@ import { geminiProtocol } from './protocols/gemini.js';
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
 const MODE_LABELS = { Q: '快速', S: '标准', F: '完整' };
 
-// 开源仓库 / 反馈渠道占位地址（部署时替换为真实仓库）
-const REPO_URL = 'https://github.com/your-org/ai-detector';
+// 开源仓库 / 反馈渠道
+const REPO_URL = 'https://github.com/aabao325/check';
 const ISSUE_URL = REPO_URL + '/issues';
 
 // 每个探针的一句话说明（用于「检测项说明 / FAQ」区，按 id 取；缺省回退到探针 name）

@@ -420,19 +420,46 @@ function reflowCards() {
   }
 }
 
-/* ---------------- 一键全检 ---------------- */
+/* ---------------- 一键全检 ----------------
+ * 编排：channel_id（渠道来源识别）必须先跑——它会把判定出的渠道写入
+ * ctx.shared.channel，其余探针都依赖它。剩余探针之间彼此独立，
+ * 因此并发执行（带并发上限，避免对中转站瞬时打太多并发被限流/误判）。
+ */
+const RUN_CONCURRENCY = 6;
+
+async function runPool(items, worker, limit) {
+  let i = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      await worker(items[idx]);
+    }
+  });
+  await Promise.all(runners);
+}
+
 async function runAll() {
   if (!cfg().targetUrl) { toast('请先填写接口地址'); return; }
   const btn = $('#runBtn'); btn.disabled = true; btn.textContent = '检测中…';
   state.results = {};
   const cards = $$('#cards .probe-card');
-  // channel_id 先跑（别的探针依赖它的渠道判定）
   const probes = selectedProbes();
-  const ordered = [...probes].sort((a, b) => (a.id === 'channel_id' ? -1 : 0));
-  for (const probe of ordered) {
-    const card = cards.find((c) => c.dataset.id === probe.id);
-    if (card) await runOne(probe, card);
+  const cardOf = (probe) => cards.find((c) => c.dataset.id === probe.id);
+
+  // 阶段一：channel_id 先跑（别的探针依赖它的渠道判定）
+  const channelProbe = probes.find((p) => p.id === 'channel_id');
+  if (channelProbe) {
+    const card = cardOf(channelProbe);
+    if (card) await runOne(channelProbe, card);
   }
+
+  // 阶段二：其余探针互相独立 → 并发执行（带上限）
+  const rest = probes.filter((p) => p.id !== 'channel_id');
+  await runPool(rest, async (probe) => {
+    const card = cardOf(probe);
+    if (card) await runOne(probe, card);
+  }, RUN_CONCURRENCY);
+
   btn.disabled = false; btn.textContent = '🟢 一键全检';
   updateOverview();
   reflowCards();

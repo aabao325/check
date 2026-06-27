@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" role="img" aria-label="真伪检测盾牌">
+  <defs>
+    <linearGradient id="sg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="33%" stop-color="#9B72CB"/>
+      <stop offset="66%" stop-color="#EA4986"/>
+      <stop offset="100%" stop-color="#FF8A3D"/>
+    </linearGradient>
+  </defs>
+  <path d="M12 1.6 20.4 4.9V11c0 5.3-3.6 9.4-8.4 11.3C7.2 20.4 3.6 16.3 3.6 11V4.9Z" fill="url(#sg)"/>
+  <path d="M8 12.1l2.7 2.7L16.2 9" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -12,7 +12,7 @@
  *
  * 思路全部吸收自 veridrop 的 anthropic detectors（权重、阈值对齐）。
  * ===================================================================== */
-import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=9';
+import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=14';
 
 // 多模态魔法串（PDF 探针）。
 const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
@@ -52,7 +52,7 @@ function errored(reason) {
 /* ===================================================================== */
 
 const channel_id = {
-  id: 'channel_id', name: '渠道来源识别', weight: 5, modes: ['Q', 'S', 'F'], passive: true,
+  id: 'channel_id', name: '渠道来源识别', weight: 5, modes: ['Q', 'S', 'F'], passive: true, stage: 0,
   defaultPayload: (m) => ({
     model: m, max_tokens: 64,
     messages: [{ role: 'user', content: '你好，请回复一个字。' }],
@@ -72,7 +72,7 @@ const channel_id = {
 };
 
 const identity = {
-  id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'],
+  id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1,
   defaultPayload: (m) => ({
     model: m, max_tokens: 300,
     messages: [{ role: 'user', content: '你究竟是谁？你的模型名称和版本是什么？由哪家公司开发？请简洁回答。' }],

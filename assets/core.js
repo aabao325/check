@@ -274,7 +274,7 @@ export async function shareReport(reportPayload) {
     });
     const j = await r.json();
     if (j.ok && j.id) {
-      const url = new URL('report.html', location.href);
+      const url = new URL('report', location.href);
       url.searchParams.set('id', j.id);
       return { ok: true, mode: 'short', url: url.toString() };
     }
@@ -282,22 +282,33 @@ export async function shareReport(reportPayload) {
 
   // 2) 退化：URL hash 静态分享
   const packed = btoa(unescape(encodeURIComponent(JSON.stringify(reportPayload))));
-  const url = new URL('report.html', location.href);
+  const url = new URL('report', location.href);
   url.hash = 'data=' + packed;
   return { ok: true, mode: 'hash', url: url.toString() };
 }
 
-/* ---------- PNG 导出（需页面已引入 html2canvas） ---------- */
+/* ---------- PNG 导出（需页面已引入 html2canvas） ----------
+ * 注意：html2canvas 不复现浏览器对 <details> 的原生折叠语义——折叠区里的内容
+ * 会被照常画出且叠在 summary 上（截图重叠）。因此导出前临时展开容器内所有
+ * <details>（记住原本是否 open），截完图再还原，保证 PNG 里每项明细正常铺开。 */
 export async function exportPng(el, filename = 'report.png') {
   if (typeof window.html2canvas !== 'function') {
     alert('PNG 导出组件未加载（html2canvas）。请检查网络或改用链接分享。');
     return;
   }
-  const canvas = await window.html2canvas(el, { backgroundColor: '#faf9f5', scale: 2, useCORS: true });
-  const a = document.createElement('a');
-  a.href = canvas.toDataURL('image/png');
-  a.download = filename;
-  a.click();
+  const details = [...el.querySelectorAll('details')];
+  const prevOpen = details.map((d) => d.open);
+  details.forEach((d) => { d.open = true; });
+  try {
+    const canvas = await window.html2canvas(el, { backgroundColor: '#faf9f5', scale: 2, useCORS: true });
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = filename;
+    a.click();
+  } finally {
+    // 无论成功与否都还原折叠状态，避免改动用户当前看到的页面
+    details.forEach((d, i) => { d.open = prevOpen[i]; });
+  }
 }
 
 /* ---------- 字符串相似度（0~1，用于流式/非流式一致性） ---------- */

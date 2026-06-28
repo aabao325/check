@@ -24,7 +24,7 @@ return [
     'OFFICIAL_BASE_URL'  => 'https://api.anthropic.com',
 
     // ---- 分享报告的「品牌位」（报告页顶栏 / 页脚 / PNG 水印都会显示）----
-    'SITE_NAME'   => '公益 AI 检测站',
+    'SITE_NAME'   => '免费开源 AI 检测站',
     'SITE_URL'    => 'https://www.aabao.ai',  // ← 改成你的官网
     'SITE_SLOGAN' => '一键鉴别 Claude / OpenAI / Gemini 中转站真伪',
 

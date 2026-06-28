@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=9';
-import { anthropicProtocol } from './protocols/anthropic.js?v=9';
-import { openaiProtocol } from './protocols/openai.js?v=9';
-import { geminiProtocol } from './protocols/gemini.js?v=9';
+import * as core from './core.js?v=14';
+import { anthropicProtocol } from './protocols/anthropic.js?v=14';
+import { openaiProtocol } from './protocols/openai.js?v=14';
+import { geminiProtocol } from './protocols/gemini.js?v=14';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -16,13 +16,13 @@ const ISSUE_URL = REPO_URL + '/issues';
 
 // 每个探针的一句话说明（用于「检测项说明 / FAQ」区，按 id 取；缺省回退到探针 name）
 const PROBE_DESC = {
-  channel_id: '看响应 id 前缀判定渠道：msg_01=官方直连 / msg_bdrk_=Bedrock / msg_vrtx_=Vertex / chatcmpl-=疑似 OpenAI 套壳。若身份回复中自述 “Claude Code”，则进一步细分为 Claude Code 渠道。',
-  identity: '问模型「你是谁」，检查是否暴露竞品身份（GPT/Gemini 等）或被换成弱模型。',
+  channel_id: '看响应 id 前缀判定渠道：Claude msg_01=官方/msg_bdrk_=Bedrock/msg_vrtx_=Vertex；OpenAI resp_=官方 Responses、chatcmpl-=疑似套 Chat 壳。若身份回复中自述 “Claude Code / Codex”，则进一步细分为对应工具渠道。',
+  identity: '问模型「你是谁/详细身份介绍」，核对自述身份是否与官方一致；暴露竞品身份（如 Claude 协议里自称 GPT、Gemini 里自称 OpenAI）=掺假；自述 Codex/Claude Code 则细分工具渠道。',
   thinking_signature: '验证思考链的加密签名（无法伪造，最强证据）：真思考有长签名 + thinking_tokens>0。',
   message_id: '检查 message id 是否符合官方规范格式。',
-  protocol: '校验响应结构是否符合官方 schema（usage 含 cache_creation/service_tier 等新结构）。',
+  protocol: '校验响应结构是否符合官方 schema（Claude usage 含 cache_creation/service_tier；OpenAI Responses 含 output/usage.input_tokens；Gemini 含 candidates/usageMetadata），并扫描套壳污染字段。',
   consistency: '同一请求多次发送，检查模型名稳定、输出方差合理（防随机换模型）。',
-  structured_output: '强制工具调用（tool_use），检查能否正确返回结构化结果与 toolu_ 格式 id。',
+  structured_output: '强制结构化输出，检查能否按 schema 正确返回（OpenAI text.format / Gemini responseSchema / Claude tool_use）。',
   json_schema: '要求按复杂 JSON Schema 输出，校验字段合规性。',
   tool_schema_stream: '工具调用 + 复杂 Schema + 流式三合一，检查 stream 是否真透传。',
   streaming_order: '校验 SSE 流式事件顺序：message_start 起、message_stop 止、block_start 早于 delta。',
@@ -37,6 +37,11 @@ const PROBE_DESC = {
   integrity: '流式/非流式一致性：同请求两种方式结果应一致。',
   cache_behavior: 'Prompt 缓存行为：两轮同请求应「创建→命中」缓存（cache_creation/cache_read），套壳常无此能力。',
   token_usage: 'Token 计费核验：用官方 count_tokens 对比响应 usage，识别虚报/降级。',
+  token_billing: 'Token 计费核验：检查 Responses 的 usage（input_tokens/output_tokens/total_tokens）字段完整且自洽，长短 prompt 增量合理。',
+  model_consistency: '同一请求多次发送，检查响应 model 名稳定、output_tokens 方差合理（防随机换模型）。',
+  model_info: '同一请求多次发送，检查响应 modelVersion 稳定、token 方差合理（防随机换模型）。',
+  param_check: '参数验真：发 max_output_tokens=1。真官方上游会报「需 >= 16」=验真正向信号；若正常返回则结合身份——Codex 渠道不识别该字段属合理，否则可能是网关忽略参数或逆向行为（不报错≠假，记“不适用”）。',
+  thinking_probe: '思考能力 + 参数代际验真：发与模型代匹配的思考参数（3 系 thinkingLevel / 2.5 系 thinkingBudget），看 thoughtsTokenCount>0；对 2.5 系额外发新版参数验证官方会拒绝错代参数。',
   error_shape: '弃用参数验真：发 temperature/top_p（最新 Claude 已弃用）。真官方上游会报「不支持/已弃用」=验真正向信号；不报错≠假（网关可能静默忽略），记“不适用”，需自行与渠道商确认。',
   long_context: '长上下文真实性：植入暗号到约 32k/100k token 大文本，检查是否被截断。',
 };
@@ -58,6 +63,8 @@ async function init() {
   bindControls();
   fillLinks();
   selectProtocol('anthropic');
+  renderHistory();   // 从 localStorage 读出历史并渲染（刷新不丢的兑现点）
+  bindHistoryModal();
   // 静默 ping 后端拿品牌信息（不再显示"后端连接状态"，避免小白误以为有云端存储）
   const ping = await core.pingBackend();
   if (ping) {
@@ -180,10 +187,33 @@ function bindControls() {
 
 function cfg() {
   return {
-    targetUrl: $('#endpoint').value.trim(),
+    targetUrl: resolveTargetUrl(),
     apiKey: $('#apiKey').value.trim(),
     authStyle: PROTOCOLS[state.protocol].authStyle,
   };
+}
+
+/* 计算最终目标 URL。
+ * Gemini 原生路径模型名在 URL 里（…/models/{model}:generateContent），所以以 #model 框为准
+ * 自动拼接；其余协议直接用 #endpoint 原值。 */
+function resolveTargetUrl() {
+  const base = $('#endpoint').value.trim();
+  if (state.protocol === 'gemini') return geminiUrl(base, $('#model').value.trim());
+  return base;
+}
+
+/* 幂等拼接 Gemini 原生 generateContent URL（兼容用户多种填法）：
+ * - 已含 :generateContent / :streamGenerateContent 等动作 → 原样用
+ * - 以 /models 结尾 → 拼 /{model}:generateContent
+ * - 以 /models/{model} 结尾（漏了动作）→ 补 :generateContent
+ * - 其它（如填到 .../v1beta）→ 当根基址补全 /models/{model}:generateContent */
+function geminiUrl(base, model) {
+  base = (base || '').trim().replace(/\/+$/, '');
+  if (!base) return base;
+  if (/:(generate|streamGenerate|count|embed)\w*content/i.test(base)) return base;
+  if (/\/models$/i.test(base)) return `${base}/${model}:generateContent`;
+  if (/\/models\/[^/:]+$/i.test(base)) return `${base}:generateContent`;
+  return `${base}/models/${model}:generateContent`;
 }
 function extraHeaders() {
   const h = {};
@@ -409,9 +439,25 @@ function sharedCtx() {
 
 function appendLongText(payload) {
   const ref = '\n\nReference text:' + ' apple'.repeat(80);
-  const msgs = payload.messages || [];
-  const last = msgs[msgs.length - 1];
-  if (last && typeof last.content === 'string') last.content += ref;
+  // Anthropic / OpenAI 兼容端：messages[last].content 字符串
+  const msgs = payload.messages;
+  if (Array.isArray(msgs) && msgs.length) {
+    const last = msgs[msgs.length - 1];
+    if (last && typeof last.content === 'string') { last.content += ref; return; }
+  }
+  // OpenAI Responses：input[last].content 字符串
+  const input = payload.input;
+  if (Array.isArray(input) && input.length) {
+    const last = input[input.length - 1];
+    if (last && typeof last.content === 'string') { last.content += ref; return; }
+  }
+  // Gemini 原生：contents[last].parts[0].text
+  const contents = payload.contents;
+  if (Array.isArray(contents) && contents.length) {
+    const last = contents[contents.length - 1];
+    const part = last?.parts?.[0];
+    if (part && typeof part.text === 'string') { part.text += ref; }
+  }
 }
 
 async function tryOfficialCount(payload) {
@@ -523,23 +569,22 @@ async function runAll() {
   const probes = selectedProbes();
   const cardOf = (probe) => cards.find((c) => c.dataset.id === probe.id);
 
-  // 阶段一：channel_id 先跑（别的探针依赖它的渠道判定）
-  const channelProbe = probes.find((p) => p.id === 'channel_id');
-  if (channelProbe) {
-    const card = cardOf(channelProbe);
-    if (card) await runOne(channelProbe, card);
+  // 阶段化编排：按 probe.stage（缺省 99）升序分组，组内并发、组间串行。
+  // 渠道识别(stage 0)→身份识别(stage 1)先跑并把判定写入 ctx.shared.channel，
+  // 依赖渠道结果的探针（如 OpenAI param_check, stage 2）随后才跑，避免并发竞态。
+  const stages = [...new Set(probes.map((p) => p.stage ?? 99))].sort((a, b) => a - b);
+  for (const s of stages) {
+    const group = probes.filter((p) => (p.stage ?? 99) === s);
+    await runPool(group, async (probe) => {
+      const card = cardOf(probe);
+      if (card) await runOne(probe, card);
+    }, RUN_CONCURRENCY);
   }
 
-  // 阶段二：其余探针互相独立 → 并发执行（带上限）
-  const rest = probes.filter((p) => p.id !== 'channel_id');
-  await runPool(rest, async (probe) => {
-    const card = cardOf(probe);
-    if (card) await runOne(probe, card);
-  }, RUN_CONCURRENCY);
-
-  btn.disabled = false; btn.textContent = '🟢 一键全检';
+  btn.disabled = false; btn.textContent = '🟢 开始检测';
   updateOverview();
   reflowCards();
+  saveHistory();   // 整套检测跑完 → 自动存一条历史快照到本地（单项「发送」不触发）
   toast('检测完成');
 }
 
@@ -610,10 +655,22 @@ async function doShare() {
   const payload = buildReportPayload();
   const r = await core.shareReport(payload);
   if (r.ok) {
+    // 复制给用户的：无后缀干净版（线上伪静态 …/report?id=xxx，更专业）
     try { await navigator.clipboard.writeText(r.url); } catch { /* ignore */ }
     toast(`分享链接已复制（${r.mode === 'short' ? '短链接' : '静态链接'}）：${r.url}`);
-    window.open(r.url, '_blank');
+    // 我们自己打开预览的：带 .html 后缀版，不依赖伪静态，任何部署都能打开（用户看不到此 URL）
+    window.open(openableUrl(r.url), '_blank');
   } else toast('分享失败');
+}
+
+/* 把无后缀分享链接转成带 .html 后缀的可直接打开版（仅用于 window.open 预览，不复制给用户）。
+ * 兼容两种形态：短链 …/report?id=xxx → …/report.html?id=xxx；退化长链 …/report#data=… → …/report.html#data=… */
+function openableUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/report')) u.pathname += '.html';
+    return u.toString();
+  } catch { return url; }
 }
 
 /* ---------------- 配置库（本地保存接口/模型/Key/beta，按御三家协议归类） ----------------
@@ -760,6 +817,163 @@ function startRename(idx) {
     else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
   });
   input.addEventListener('blur', () => finish(true));
+}
+
+/* ---------------- 检测历史（本地，仅存浏览器 localStorage） ----------------
+ * 每跑完一整套检测（runAll）自动存一条快照（复用 buildReportPayload()，
+ * 天生不含 API Key、只含域名 host，符合「不保存 Key/数据」承诺）。
+ * 切协议/刷新页面都不丢失。点「查看详情」用 iframe 嵌 report.html 复用报告页完整渲染。
+ * 数据形如：[{ id, savedAt, protocol, model, targetHost, channel, totalScore, verdict, critical, results[] }, ...]，时间倒序。
+ */
+const HISTORY_KEY = 'apicheck.history.v1';
+const HISTORY_MAX = 30;
+
+function loadHistory() {
+  try {
+    const a = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(a) ? a : [];
+  } catch { return []; }
+}
+function persistHistory(list) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); return true; }
+  catch { toast('历史保存失败：本地存储不可用或已满'); return false; }
+}
+
+/* 生成一个本地唯一 id（仅用于删除定位，不含敏感信息） */
+let _histSeq = 0;
+function newHistoryId() {
+  _histSeq = (_histSeq + 1) % 100000;
+  return 'h' + new Date().getTime().toString(36) + _histSeq.toString(36);
+}
+
+/* runAll 跑完调用：打快照 → 入队头 → 超 30 条删最旧 → 写回 → 刷新面板 */
+function saveHistory() {
+  if (!Object.keys(state.results).length) return;   // 空结果不存（保险）
+  const snap = buildReportPayload();
+  snap.id = newHistoryId();
+  snap.savedAt = new Date().toISOString();
+  const list = loadHistory();
+  list.unshift(snap);
+  if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;   // 截断尾部最旧
+  if (persistHistory(list)) renderHistory();
+}
+
+/* 综合分 → 徽标配色类（与报告页 level 阈值一致：85/70/50） */
+function scoreCls(item) {
+  if (item.critical) return 'crit';
+  const s = item.totalScore || 0;
+  if (s >= 70) return 'pass';
+  if (s >= 50) return 'warn';
+  return 'fail';
+}
+
+/* 把 ISO 时间格式化成「MM-DD HH:mm」（本地时区，简洁占位少） */
+function fmtTime(iso) {
+  try {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return (iso || '').slice(5, 16).replace('T', ' '); }
+}
+
+/* 渲染右侧历史面板 */
+function renderHistory() {
+  const list = loadHistory();
+  const countEl = $('#historyCount');
+  if (countEl) countEl.textContent = list.length ? ` (${list.length})` : '';
+  const clearBtn = $('#historyClearBtn');
+  if (clearBtn) clearBtn.style.display = list.length ? '' : 'none';
+  const box = $('#historyList');
+  if (!box) return;
+  if (!list.length) {
+    box.innerHTML = `<div class="history-empty">暂无检测记录。点「🟢 开始检测」跑完一次后会自动记录在这里，仅存本机浏览器。</div>`;
+    return;
+  }
+  box.innerHTML = list.map((it) => {
+    const proto = PROTOCOLS[it.protocol];
+    const ico = proto?.icon
+      ? `<img class="hi-ico" src="${proto.icon}" alt="${core.esc(proto.name || it.protocol)}">`
+      : `<span class="hi-ico">${proto?.emoji || '•'}</span>`;
+    const cls = scoreCls(it);
+    const score = (it.totalScore != null ? it.totalScore : '--');
+    return `<div class="history-item">
+        <button class="history-open" data-id="${it.id}" title="查看完整检测报告">
+          <span class="hi-top">
+            <span class="hi-time">${fmtTime(it.savedAt)}</span>
+            <span class="hi-score ${cls}">${score}分</span>
+          </span>
+          <span class="hi-bot">
+            ${ico}
+            <span class="hi-model">${core.esc(it.model || it.protocol || '—')}</span>
+            <span class="hi-host">${core.esc(it.targetHost || '')}</span>
+          </span>
+        </button>
+        <button class="history-del" data-id="${it.id}" title="删除这条记录">✕</button>
+      </div>`;
+  }).join('');
+  box.querySelectorAll('.history-open').forEach((b) => { b.onclick = () => openHistoryDetail(b.dataset.id); });
+  box.querySelectorAll('.history-del').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); deleteHistory(b.dataset.id); }; });
+}
+
+function deleteHistory(id) {
+  const list = loadHistory().filter((x) => x.id !== id);
+  if (persistHistory(list)) renderHistory();
+}
+
+function clearHistory() {
+  if (!loadHistory().length) return;
+  if (!confirm('确定清空全部检测历史吗？此操作不可恢复（仅清除本机浏览器中的记录）。')) return;
+  if (persistHistory([])) { renderHistory(); toast('已清空检测历史'); }
+}
+
+/* ---------------- 检测历史「查看详情」弹窗（iframe 嵌 report.html#data=） ---------------- */
+function bindHistoryModal() {
+  const toggle = $('#historyToggle');
+  if (toggle) toggle.onclick = () => {
+    const store = $('#historyStore');
+    const collapsed = store.classList.toggle('collapsed');
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+  };
+  const clearBtn = $('#historyClearBtn');
+  if (clearBtn) clearBtn.onclick = clearHistory;
+
+  const overlay = $('#historyModal');
+  const closeBtn = $('#historyModalClose');
+  if (closeBtn) closeBtn.onclick = closeHistoryDetail;
+  // 点遮罩空白处关闭（点弹窗本体不关）
+  if (overlay) overlay.onclick = (e) => { if (e.target === overlay) closeHistoryDetail(); };
+  // Esc 关闭
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && overlay && overlay.style.display !== 'none') closeHistoryDetail();
+  });
+}
+
+function openHistoryDetail(id) {
+  const item = loadHistory().find((x) => x.id === id);
+  if (!item) { toast('记录不存在'); return; }
+  const overlay = $('#historyModal');
+  const frame = $('#historyModalFrame');
+  const title = $('#historyModalTitle');
+  if (!overlay || !frame) return;
+  // 与 core.shareReport 的 hash 静态分享同款编码，report.js 的 #data= 分支会原样解码渲染
+  const packed = btoa(unescape(encodeURIComponent(JSON.stringify(item))));
+  // iframe 内部加载用带后缀的 report.html（用户看不到此 URL，且不依赖服务器伪静态，任何部署都稳）；
+  // 用户能看到/复制的对外链接（shareReport 生成的）才去掉 .html 后缀。
+  frame.src = `report.html#data=${packed}`;
+  if (title) title.textContent = `检测报告 · ${fmtTime(item.savedAt)} · ${item.model || item.protocol || ''}`;
+  overlay.style.display = '';
+  overlay.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';   // 锁背景滚动
+}
+
+function closeHistoryDetail() {
+  const overlay = $('#historyModal');
+  const frame = $('#historyModalFrame');
+  if (!overlay) return;
+  overlay.style.display = 'none';
+  overlay.setAttribute('aria-hidden', 'true');
+  if (frame) frame.src = 'about:blank';   // 卸载 iframe，释放内存
+  document.body.style.overflow = '';
 }
 
 /* ---------------- toast ---------------- */

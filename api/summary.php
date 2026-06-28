@@ -63,7 +63,9 @@ $payload = [
         ['role' => 'user',   'content' => $detail],
     ],
     'temperature' => 0.3,
-    'max_tokens'  => 800,
+    // glm-4.7-flash 等推理模型会先产出大量思考(reasoning_content)再出正文(content)，
+    // max_tokens 给小了思考就吃光额度、正文被截断为空。这里给足，确保正文完整。
+    'max_tokens'  => 2500,
 ];
 
 $headers = [
@@ -83,10 +85,22 @@ if ($res['error'] || $res['httpStatus'] < 200 || $res['httpStatus'] >= 300) {
 }
 
 $data = json_decode($res['body'], true);
-$text = $data['choices'][0]['message']['content'] ?? '';
+$msg  = $data['choices'][0]['message'] ?? [];
+$text = trim($msg['content'] ?? '');
+
+// 推理模型兜底：正文为空但有思考内容时，退而用思考内容（去掉可能的步骤编号噪声）。
+if ($text === '') {
+    $text = trim($msg['reasoning_content'] ?? '');
+}
 
 if ($text === '') {
-    out(200, ['ok' => false, 'error' => 'GLM 返回为空', 'fallback' => true]);
+    $finish = $data['choices'][0]['finish_reason'] ?? '';
+    out(200, [
+        'ok' => false,
+        'error' => 'GLM 返回为空' . ($finish === 'length' ? '（疑似 max_tokens 不足被截断）' : '') . ($finish ? "（finish_reason={$finish}）" : ''),
+        'raw' => mb_substr($res['body'] ?? '', 0, 500),
+        'fallback' => true,
+    ]);
 }
 
 out(200, ['ok' => true, 'summary' => trim($text)]);

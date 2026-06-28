@@ -16,7 +16,7 @@
  *     body: {
  *       targetUrl:  "https://xxx/v1/messages",
  *       apiKey:     "sk-...",
- *       authStyle:  "x-api-key" | "bearer",   // Claude 用 x-api-key，OpenAI/Gemini 兼容端用 bearer
+ *       authStyle:  "x-api-key" | "bearer" | "gemini",  // Claude 用 x-api-key，OpenAI 用 bearer，Gemini 原生用 gemini(x-goog-api-key)
  *       payload:    {...},                     // 要发给目标的请求体（对象）
  *       extraHeaders: { "anthropic-beta": "..." }  // 可选附加头
  *     }
@@ -64,7 +64,11 @@ if (!preg_match('#^https?://#i', $targetUrl)) {
 // 组装转发头
 $headers = ['Content-Type: application/json'];
 if ($apiKey !== '') {
-    if ($authStyle === 'bearer') {
+    if ($authStyle === 'gemini') {
+        // Gemini 原生路径（…/models/{model}:generateContent）：key 走 x-goog-api-key 头，
+        // 不加任何 Authorization / anthropic-version（多余的 Authorization 会被部分严格上游拒绝）。
+        $headers[] = 'x-goog-api-key: ' . $apiKey;
+    } elseif ($authStyle === 'bearer') {
         $headers[] = 'Authorization: Bearer ' . $apiKey;
     } else {
         // Claude 协议：同时给 x-api-key 和 Authorization，兼容各种中转站写法

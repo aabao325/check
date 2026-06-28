@@ -52,7 +52,8 @@ if (!is_dir(DATA_DIR) || !is_writable(DATA_DIR)) {
 // 生成短 id（时间戳片段 + 随机）
 $id = substr(base_convert((string)time(), 10, 36), -4) . bin2hex(random_bytes(4));
 
-// 只保留必要字段，剥离可能很大的原始请求/响应体（报告页不需要全文）
+// 保存报告。保留各检测项的真实请求/响应体（io），供报告页「查看请求体/响应体」自查取证；
+// 导出 PNG 时前端会隐藏 io，不影响传播图。用户服务器内存/带宽充足，原样全存。
 $store = [
     'savedAt'    => date('c'),
     'protocol'   => $in['protocol']   ?? '',
@@ -70,8 +71,10 @@ $store = [
             'weight'   => $r['weight']   ?? null,
             'verdict'  => $r['verdict']  ?? '',
             'severity' => $r['severity'] ?? '',
+            'status'   => $r['status']   ?? '',
             'features' => array_slice($r['features'] ?? [], 0, 12),
             'diffs'    => array_slice($r['diffs'] ?? [], 0, 12),
+            'io'       => $r['io'] ?? null,   // 真实请求体/响应体（含多轮 rounds），原样保留
         ];
     }, $in['results'] ?? []),
 ];

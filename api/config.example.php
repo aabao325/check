@@ -15,7 +15,9 @@ return [
     // ---- 智谱 GLM（用于「生成 AI 总结」）。留空则回退本地规则总结 ----
     // 申请：https://open.bigmodel.cn/
     'GLM_KEY'   => '',                        // ← 改成你的智谱 key，如 sk-xxx
-    'GLM_MODEL' => 'glm-4.7-flash',           // 免费款；若智谱更新型号名，改这里
+    // 用非推理模型 glm-4-flash：正文直出、省 token、限流更轻。
+    // 别用 glm-4.x-flash 这类推理模型——思考(reasoning)会吃光 max_tokens 导致正文为空，且易 429。
+    'GLM_MODEL' => 'glm-4-flash',             // 免费款；若智谱更新型号名，改这里
     'GLM_URL'   => 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
 
     // ---- （可选）Anthropic 官方 count_tokens 的 key，用于精确核对中转站上报的 input_tokens ----

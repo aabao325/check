@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=14';
-import { anthropicProtocol } from './protocols/anthropic.js?v=14';
-import { openaiProtocol } from './protocols/openai.js?v=14';
-import { geminiProtocol } from './protocols/gemini.js?v=14';
+import * as core from './core.js?v=15';
+import { anthropicProtocol } from './protocols/anthropic.js?v=15';
+import { openaiProtocol } from './protocols/openai.js?v=15';
+import { geminiProtocol } from './protocols/gemini.js?v=15';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -635,11 +635,27 @@ function localSummary(p) {
 }
 
 function buildReportPayload() {
-  const results = Object.values(state.results).map(({ probe, result }) => ({
-    name: probe.name, score: result.score, weight: probe.weight,
-    verdict: result.verdict, severity: result.severity, status: result.status,
-    features: result.features || [], diffs: result.diffs || [],
-  }));
+  const results = Object.values(state.results).map(({ probe, result }) => {
+    const ctx = result._ctx || {};
+    // 附带真实请求体/响应体，供报告页「查看请求体/响应体」自查取证（PNG 导出时不展示）。
+    // key 走 header 不进 body，请求体本身不含 key，原样存。
+    const io = {
+      request: ctx.requestPayload ?? null,
+      httpStatus: ctx.httpStatus ?? null,
+      // 多轮探针（multi/tokenPair/dualStream）按轮存；单次存单个 body。
+      rounds: Array.isArray(ctx.rounds) && ctx.rounds.length > 1
+        ? ctx.rounds.map((r) => ({ label: r.label, httpStatus: r.httpStatus, body: r.body }))
+        : null,
+      response: ctx.body ?? null,
+    };
+    const hasIo = io.request != null || io.response != null || (io.rounds && io.rounds.length);
+    return {
+      name: probe.name, score: result.score, weight: probe.weight,
+      verdict: result.verdict, severity: result.severity, status: result.status,
+      features: result.features || [], diffs: result.diffs || [],
+      io: hasIo ? io : null,
+    };
+  });
   const ov = state._overview || {};
   return {
     protocol: state.protocol, model: $('#model').value.trim(),

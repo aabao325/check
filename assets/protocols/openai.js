@@ -6,7 +6,7 @@
  * 探针顺序：渠道识别(0)→身份识别(1)→…→参数检测(2)，身份判定的渠道（如 Codex CLI）
  * 写入 ctx.shared.channel 供 param_check 读取。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=14';
+import { coefficientOfVariation } from '../core.js?v=15';
 
 /* ---------- 小工具 ---------- */
 // 遍历 output 数组取最终文本：找 type==='message' 项里的 output_text；
@@ -30,6 +30,14 @@ function reasoningOnly(j) {
 }
 function fail(reason, score = 0, severity = '') {
   return { features: [], diffs: [reason], score, verdict: '假', severity, status: 'done' };
+}
+// 判断 text 中 idx 位置的词是否处于「否定语境」（如「我不是 Codex」「not the Codex…」）。
+// 取该词前一小段窗口找否定标记，避免把模型的澄清/否认当成正面自述。text 已 toLowerCase。
+function isNegatedNearby(text, idx) {
+  if (typeof idx !== 'number' || idx < 0) return false;
+  const window = text.slice(Math.max(0, idx - 14), idx);
+  // 中文否定：不是/不属于/并非/并不是/而非/绝非/不算/没有；英文：not / n't / never / isn't…（n't 已被 't 覆盖）
+  return /不是|不属于|不算|并非|并不|而非|绝非|没有|\bnot\b|n['’]t|\bnever\b/.test(window);
 }
 function isResponsesError(j) {
   return j && j.error && typeof j.error === 'object';
@@ -69,7 +77,8 @@ const identity = {
   id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1,
   defaultPayload: (m) => ({
     model: m, max_output_tokens: 600,
-    input: [{ role: 'user', content: '你究竟是谁？你的模型名称和版本是什么？由哪家公司开发？是否是某个命令行工具（如 Codex）的内置助手？请简洁回答。' }],
+    // 中性提问：不主动提及 Codex/任何渠道，避免把关键词喂给模型后又拿它来判定（自我污染）。
+    input: [{ role: 'user', content: '你究竟是谁？你的模型名称和版本是什么？由哪家公司开发？请简洁回答。' }],
   }),
   analyze(ctx) {
     const text = (outputText(ctx.json) || '').toLowerCase();
@@ -80,11 +89,15 @@ const identity = {
     const features = [];
     const hasOpenAI = /\bopenai\b/.test(text);
     const hasGpt = /\bgpt[\s\-]?[0-9]/.test(text) || /\bchatgpt\b/.test(text);
-    // "codex" / "codex cli"：命中即视为 Codex 工具渠道
-    const hasCodex = /\bcodex\b/.test(text);
+    // "codex"：仅当模型【自发肯定】自己是 Codex 时才算渠道信号。
+    // 否定语境（如「我不是 Codex」「并非 Codex」「not the Codex assistant」）不计——
+    // 否则模型澄清「我不是 Codex」反而被误判成 Codex 渠道（自我污染的典型坑）。
+    const codexMatch = text.match(/\bcodex\b/);
+    const hasCodexWord = !!codexMatch;
+    const codexAffirmed = hasCodexWord && !isNegatedNearby(text, codexMatch.index);
     const rivals = RIVAL_WORDS.filter((w) => text.includes(w));
     features.push(`含 "openai": ${hasOpenAI ? '是' : '否'}`, `含 "gpt/chatgpt": ${hasGpt ? '是' : '否'}`,
-      `含 "codex": ${hasCodex ? '是' : '否'}`);
+      `自述为 codex: ${hasCodexWord ? (codexAffirmed ? '是' : '否（否定语境，已忽略）') : '否'}`);
 
     const diffs = [];
     let score, severity = '';
@@ -102,9 +115,9 @@ const identity = {
       score = 0; diffs.push('完全未提及 OpenAI / GPT');
     }
 
-    // 渠道细分：自述含 "codex" → 判为 Codex CLI 渠道（类似 Claude Code），而非官方直连。
-    // 仅在 channel_id 已判为官方(openai) 时覆盖——套壳/异常结论保持不变。
-    if (hasCodex && ctx.shared && ctx.shared.channel && ctx.shared.channel.code === 'openai') {
+    // 渠道细分：模型【自发肯定】自己是 Codex → 判为 Codex CLI 渠道（类似 Claude Code），而非官方直连。
+    // 仅在 channel_id 已判为官方(openai) 时覆盖——套壳/异常结论保持不变；否定语境不触发。
+    if (codexAffirmed && ctx.shared && ctx.shared.channel && ctx.shared.channel.code === 'openai') {
       ctx.shared.channel.channel = 'Codex CLI';
       ctx.shared.channel.code = 'codex';
       features.push('回复自述含 "codex" → 渠道修正为 Codex CLI（而非官方直连）');

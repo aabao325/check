@@ -73,7 +73,20 @@ $headers = [
     'Authorization: Bearer ' . GLM_KEY,
 ];
 
-$res = curl_forward(GLM_URL, 'POST', $headers, json_encode($payload, JSON_UNESCAPED_UNICODE));
+$bodyJson = json_encode($payload, JSON_UNESCAPED_UNICODE);
+
+// 智谱免费档（尤其 flash 系列）高峰期容易返回 429「访问量过大」(code 1305)，
+// 偶发也会撞上网络抖动或 5xx。这些都是瞬时故障，自动重试即可救回，避免前端无谓回退本地总结。
+// 仅对「网络错误 / 429 / 5xx」重试；4xx（如 key 错、参数错）是确定性错误，不重试。
+$res = curl_forward(GLM_URL, 'POST', $headers, $bodyJson);
+$maxRetries = 3;
+for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
+    $st = $res['httpStatus'];
+    $transient = $res['error'] || $st === 429 || $st >= 500;
+    if (!$transient) break;
+    sleep($attempt);  // 退避：1s、2s、3s
+    $res = curl_forward(GLM_URL, 'POST', $headers, $bodyJson);
+}
 
 if ($res['error'] || $res['httpStatus'] < 200 || $res['httpStatus'] >= 300) {
     out(200, [

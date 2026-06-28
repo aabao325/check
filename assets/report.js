@@ -2,7 +2,7 @@
  * report.js —— 分享报告查看页（只读）
  * 支持两种来源：?id=xxx（后端短链）/ #data=base64（静态分享）
  * ===================================================================== */
-import * as core from './core.js?v=14';
+import * as core from './core.js?v=15';
 
 const $ = (s) => document.querySelector(s);
 
@@ -194,6 +194,7 @@ function buildSlimRow(r) {
   d.className = 'probe-slim';
   const score = (r.status === 'skip' || r.score == null) ? '不适用' : r.score;
   const hasDetail = (r.features || []).length || (r.diffs || []).length;
+  const ioHtml = buildIoBlock(r.io);
   d.innerHTML = `
     <summary>
       <span class="slim-tick">✅</span>
@@ -204,8 +205,33 @@ function buildSlimRow(r) {
     <div class="pc-analysis" style="display:grid">
       <div class="feats"><div class="feat-title">🔍 特征</div><ul>${(r.features || []).map((f) => `<li>${core.esc(f)}</li>`).join('') || '<li class="muted">无</li>'}</ul></div>
       <div class="diffs"><div class="feat-title">差异</div><ul>${(r.diffs || []).map((x) => `<li>${core.esc(x)}</li>`).join('') || '<li class="muted">无</li>'}</ul></div>
-    </div>` : ''}`;
+    </div>` : ''}
+    ${ioHtml}`;
   return d;
+}
+
+/* ---------------- 请求体 / 响应体 可展开区 ----------------
+ * 让用户进报告页能点开看真实请求/响应，便于自查取证（尤其异常项）。
+ * 标 class="io-skip-png"：导出 PNG 时 core.exportPng 会识别并隐藏它，PNG 不含 body。 */
+function buildIoBlock(io) {
+  if (!io) return '';
+  const reqHtml = io.request != null
+    ? `<div class="io-sec"><div class="io-label">📤 请求体</div><pre class="io-pre">${core.esc(core.pretty(io.request))}</pre></div>`
+    : '';
+  let respHtml = '';
+  if (io.rounds && io.rounds.length) {
+    // 多轮：逐轮展示
+    respHtml = io.rounds.map((r) =>
+      `<div class="io-sec"><div class="io-label">📥 ${core.esc(r.label || '响应')}${r.httpStatus != null ? ` · HTTP ${r.httpStatus}` : ''}</div><pre class="io-pre">${core.esc(core.pretty(r.body) || '(空响应)')}</pre></div>`
+    ).join('');
+  } else if (io.response != null) {
+    respHtml = `<div class="io-sec"><div class="io-label">📥 响应体${io.httpStatus != null ? ` · HTTP ${io.httpStatus}` : ''}</div><pre class="io-pre">${core.esc(core.pretty(io.response) || '(空响应)')}</pre></div>`;
+  }
+  if (!reqHtml && !respHtml) return '';
+  return `<details class="io-detail io-skip-png">
+    <summary>📄 查看请求体 / 响应体（用于自查取证）</summary>
+    <div class="io-body">${reqHtml}${respHtml}</div>
+  </details>`;
 }
 
 function channelCode(ch) {
@@ -233,7 +259,8 @@ function buildCard(r) {
     <div class="pc-analysis" style="display:grid">
       <div class="feats"><div class="feat-title">🔍 特征</div><ul>${(r.features || []).map((f) => `<li>${core.esc(f)}</li>`).join('') || '<li class="muted">无</li>'}</ul></div>
       <div class="diffs"><div class="feat-title">⚠️ 差异</div><ul>${(r.diffs || []).map((d) => `<li>${core.esc(d)}</li>`).join('') || '<li class="muted">无</li>'}</ul></div>
-    </div>`;
+    </div>
+    ${buildIoBlock(r.io)}`;
   return card;
 }
 

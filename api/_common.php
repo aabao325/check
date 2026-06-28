@@ -33,7 +33,7 @@ function cfg_get($cfg, $key, $default) {
 }
 
 define('GLM_KEY',            cfg_get($__cfg, 'GLM_KEY', ''));
-define('GLM_MODEL',          cfg_get($__cfg, 'GLM_MODEL', 'glm-4.7-flash'));
+define('GLM_MODEL',          cfg_get($__cfg, 'GLM_MODEL', 'glm-4-flash'));
 define('GLM_URL',            cfg_get($__cfg, 'GLM_URL', 'https://open.bigmodel.cn/api/paas/v4/chat/completions'));
 
 define('OFFICIAL_COUNT_KEY', cfg_get($__cfg, 'OFFICIAL_COUNT_KEY', ''));

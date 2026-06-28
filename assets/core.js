@@ -290,13 +290,22 @@ export async function shareReport(reportPayload) {
 /* ---------- PNG 导出（需页面已引入 html2canvas） ----------
  * 注意：html2canvas 不复现浏览器对 <details> 的原生折叠语义——折叠区里的内容
  * 会被照常画出且叠在 summary 上（截图重叠）。因此导出前临时展开容器内所有
- * <details>（记住原本是否 open），截完图再还原，保证 PNG 里每项明细正常铺开。 */
+ * <details>（记住原本是否 open），截完图再还原，保证 PNG 里每项明细正常铺开。
+ *
+ * 例外：标了 .io-skip-png 的「请求体/响应体」区——PNG 是对外传播图，只要结论不要
+ * 原始 body（体积大、不必要）。导出时把这些区整体 display:none，且不展开它内部的
+ * details，截完还原。这样用户在报告页能点开看 body，但 PNG 里不含。 */
 export async function exportPng(el, filename = 'report.png') {
   if (typeof window.html2canvas !== 'function') {
     alert('PNG 导出组件未加载（html2canvas）。请检查网络或改用链接分享。');
     return;
   }
-  const details = [...el.querySelectorAll('details')];
+  // 1) 把请求/响应体区整体隐藏（记住原 inline display）
+  const ioBlocks = [...el.querySelectorAll('.io-skip-png')];
+  const prevDisplay = ioBlocks.map((d) => d.style.display);
+  ioBlocks.forEach((d) => { d.style.display = 'none'; });
+  // 2) 展开其余所有 details（排除 io-skip-png 自身及其内部，避免无谓展开已隐藏的内容）
+  const details = [...el.querySelectorAll('details')].filter((d) => !d.classList.contains('io-skip-png') && !d.closest('.io-skip-png'));
   const prevOpen = details.map((d) => d.open);
   details.forEach((d) => { d.open = true; });
   try {
@@ -306,8 +315,9 @@ export async function exportPng(el, filename = 'report.png') {
     a.download = filename;
     a.click();
   } finally {
-    // 无论成功与否都还原折叠状态，避免改动用户当前看到的页面
+    // 无论成功与否都还原折叠状态与 IO 区可见性，避免改动用户当前看到的页面
     details.forEach((d, i) => { d.open = prevOpen[i]; });
+    ioBlocks.forEach((d, i) => { d.style.display = prevDisplay[i]; });
   }
 }
 

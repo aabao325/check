@@ -198,7 +198,7 @@ details.adv summary:hover { color: var(--ink); }
   position: fixed; top: 84px;
   /* 50vw 视口中线；正文半宽 540px；右移 20px 间距落到右侧留白 */
   left: calc(50vw + 540px + 20px);
-  width: 208px; max-height: calc(100vh - 104px); overflow-y: auto; z-index: 5;
+  width: 248px; max-height: calc(100vh - 104px); overflow-y: auto; z-index: 5;
   display: flex; flex-direction: column; gap: 12px;
 }
 .cfg-store {
@@ -212,8 +212,8 @@ details.adv summary:hover { color: var(--ink); }
   font-weight: 700; font-size: 12px;
 }
 .cfg-store-head:hover { color: var(--ink); }
-.cfg-store-title { display: inline-flex; align-items: baseline; gap: 5px; }
-.cfg-store-title .muted { font-size: 10.5px; font-weight: 600; }
+.cfg-store-title { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; }
+.cfg-store-title .muted { font-size: 10.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cfg-caret { color: var(--ink-faint); font-size: 11px; transition: transform .15s; }
 .cfg-store.collapsed .cfg-caret { transform: rotate(-90deg); }
 .cfg-store.collapsed .cfg-store-body { display: none; }
@@ -267,9 +267,9 @@ details.adv summary:hover { color: var(--ink); }
 .cfg-save-row .btn-sm { justify-content: center; width: 100%; }
 .cfg-store-tip { font-size: 10px; line-height: 1.5; margin-top: 8px; padding: 0 2px; }
 
-/* 窄屏：右侧留白放不下右侧悬浮（需视口 ≥ 2×(540+20+208)=1536px）→
- * ≤1535px 时取消悬浮，作为正文内静态卡片正常排版，避免贴边/溢出 */
-@media (max-width: 1535px) {
+/* 窄屏：右侧留白放不下右侧悬浮（需视口 ≥ 2×(540+20+248)=1616px）→
+ * ≤1615px 时取消悬浮，作为正文内静态卡片正常排版，避免贴边/溢出 */
+@media (max-width: 1615px) {
   /* 窄屏：整列取消悬浮，作为正文内静态卡片正常排版 */
   .side-rail {
     position: static; left: auto; top: auto; width: auto; max-height: none;
@@ -421,6 +421,17 @@ details.adv summary:hover { color: var(--ink); }
   font-family: var(--mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
 }
 .pc-io pre.muted { color: var(--term-dim); }
+
+/* 报告页：请求体/响应体展开区（.io-detail 折叠外观复用上方样式）。
+ * 内部 .io-body 单列堆叠请求/响应；.io-pre 用终端窗深色风、限高内滚。
+ * 整块标 .io-skip-png → core.exportPng 导出 PNG 时隐藏（PNG 不含 body）。 */
+.io-detail .io-body { padding: 0 12px 12px; display: grid; gap: 10px; }
+.io-sec .io-label { font-size: 11px; color: var(--ink-soft); font-weight: 600; margin-bottom: 4px; font-family: var(--mono); }
+.io-pre {
+  margin: 0; max-height: 280px; overflow: auto; background: var(--term-bg); color: var(--term-txt);
+  border: 1px solid var(--term-line); border-radius: 10px; padding: 11px 12px;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+}
 .resp-meta { font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; font-family: var(--mono); }
 .resp-meta .code-ok { color: var(--pass); }
 .resp-meta .code-bad { color: var(--fail); }
@@ -576,7 +587,7 @@ details.adv summary:hover { color: var(--ink); }
   color: var(--ink); font-family: inherit; line-height: 1.3; text-align: left;
 }
 .history-open .hi-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.history-open .hi-time { font-size: 10.5px; color: var(--ink-faint); font-family: var(--mono); }
+.history-open .hi-time { font-size: 10.5px; color: var(--ink-faint); font-family: var(--mono); white-space: nowrap; flex: 0 0 auto; }
 .history-open .hi-score {
   font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 20px;
   border: 1px solid var(--line); white-space: nowrap;
@@ -603,7 +614,7 @@ details.adv summary:hover { color: var(--ink); }
 .history-clear { justify-content: center; width: 100%; margin-bottom: 4px; }
 
 /* 窄屏：与配置库一致取消悬浮感、内容横排 */
-@media (max-width: 1535px) {
+@media (max-width: 1615px) {
   .history-store {
     box-shadow: none; padding: 6px 10px 10px;
   }

@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js';
-import { anthropicProtocol } from './protocols/anthropic.js';
-import { openaiProtocol } from './protocols/openai.js';
-import { geminiProtocol } from './protocols/gemini.js';
+import * as core from './core.js?v=7';
+import { anthropicProtocol } from './protocols/anthropic.js?v=7';
+import { openaiProtocol } from './protocols/openai.js?v=7';
+import { geminiProtocol } from './protocols/gemini.js?v=7';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -16,7 +16,7 @@ const ISSUE_URL = REPO_URL + '/issues';
 
 // 每个探针的一句话说明（用于「检测项说明 / FAQ」区，按 id 取；缺省回退到探针 name）
 const PROBE_DESC = {
-  channel_id: '看响应 id 前缀判定渠道：msg_01=官方直连 / msg_bdrk_=Bedrock / msg_vrtx_=Vertex / chatcmpl-=疑似 OpenAI 套壳。',
+  channel_id: '看响应 id 前缀判定渠道：msg_01=官方直连 / msg_bdrk_=Bedrock / msg_vrtx_=Vertex / chatcmpl-=疑似 OpenAI 套壳。若身份回复中自述 “Claude Code”，则进一步细分为 Claude Code 渠道。',
   identity: '问模型「你是谁」，检查是否暴露竞品身份（GPT/Gemini 等）或被换成弱模型。',
   thinking_signature: '验证思考链的加密签名（无法伪造，最强证据）：真思考有长签名 + thinking_tokens>0。',
   message_id: '检查 message id 是否符合官方规范格式。',
@@ -37,14 +37,13 @@ const PROBE_DESC = {
   integrity: '流式/非流式一致性：同请求两种方式结果应一致。',
   cache_behavior: 'Prompt 缓存行为：两轮同请求应「创建→命中」缓存（cache_creation/cache_read），套壳常无此能力。',
   token_usage: 'Token 计费核验：用官方 count_tokens 对比响应 usage，识别虚报/降级。',
-  error_shape: '错误参数报错：发多种非法参数，检查错误对象是否符合官方 schema。',
+  error_shape: '弃用参数验真：发 temperature/top_p（最新 Claude 已弃用）。真官方上游会报「不支持/已弃用」=验真正向信号；不报错≠假（网关可能静默忽略），记“不适用”，需自行与渠道商确认。',
   long_context: '长上下文真实性：植入暗号到约 32k/100k token 大文本，检查是否被截断。',
 };
 
 const state = {
   protocol: 'anthropic',
   mode: 'S',
-  scenario: 'official',
   results: {},      // probeId -> result
   brand: null,
   lastSummary: '',
@@ -57,7 +56,6 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 async function init() {
   renderProtoTabs();
   bindControls();
-  bindViewSwitch();
   fillLinks();
   selectProtocol('anthropic');
   // 静默 ping 后端拿品牌信息（不再显示"后端连接状态"，避免小白误以为有云端存储）
@@ -74,19 +72,6 @@ function fillLinks() {
   set('#repoLink', REPO_URL);
   set('#issueLink', ISSUE_URL);
   set('#faqIssueLink', ISSUE_URL);
-}
-
-/* 视图切换：自动检测 / 手动检测 */
-function bindViewSwitch() {
-  $$('#viewSwitch button').forEach((b) => b.onclick = () => {
-    const v = b.dataset.view;
-    $$('#viewSwitch button').forEach((x) => x.classList.toggle('active', x === b));
-    $$('.view').forEach((sec) => sec.classList.toggle('active', sec.id === 'view-' + v));
-    // 手动检测时隐藏「检测深度」和「自定义检测项」（不需要跑自动探针）
-    const isManual = v === 'offline';
-    $('#modeRow').style.display = isManual ? 'none' : '';
-    $('#probeToggleRow').style.display = isManual ? 'none' : '';
-  });
 }
 
 function renderProtoTabs() {
@@ -123,27 +108,9 @@ function selectProtocol(id) {
       $$('#modeBtns .mode-btn').forEach((x) => x.classList.toggle('active', x.dataset.mode === 'S'));
     }
   }
-  // 场景预设
-  const sc = $('#scenarioBtns');
-  sc.innerHTML = '';
-  if (p.scenarios.length) {
-    sc.style.display = '';
-    for (const s of p.scenarios) {
-      const b = document.createElement('button');
-      b.className = 'mode-btn preset' + (s.id === state.scenario ? ' active' : '');
-      b.textContent = s.name; b.onclick = () => { state.scenario = s.id; $$('#scenarioBtns .mode-btn').forEach((x) => x.classList.toggle('active', x === b)); };
-      sc.appendChild(b);
-    }
-  } else { sc.style.display = 'none'; }
   renderProbeToggles();
   renderProbeDocs();
   renderCards();
-  // 自由请求预填模板（用户常用那套）
-  const freeReq = $('#freeReq');
-  if (freeReq && !freeReq.dataset.touched) {
-    freeReq.value = core.pretty(p.probes[1].defaultPayload(p.defaultModel));
-    freeReq.addEventListener('input', () => { freeReq.dataset.touched = '1'; }, { once: true });
-  }
 }
 
 function renderProbeToggles() {
@@ -154,6 +121,8 @@ function renderProbeToggles() {
     const on = probe.modes.includes(state.mode);
     const label = document.createElement('label');
     label.innerHTML = `<input type="checkbox" data-id="${probe.id}" ${on ? 'checked' : ''}> ${probe.name} <span class="w">w${probe.weight}${probe.heavy ? ' · 耗费高' : ''}</span>`;
+    // 勾选/取消探针后，按新的勾选集合重建卡片（保留手改请求体）并复位结果
+    label.querySelector('input').addEventListener('change', () => { state.results = {}; renderCards(); });
     box.appendChild(label);
   }
 }
@@ -189,12 +158,15 @@ function bindControls() {
     state.mode = b.dataset.mode;
     $$('#modeBtns .mode-btn').forEach((x) => x.classList.toggle('active', x === b));
     renderProbeToggles();
+    // 切换检测深度后，按新档位的探针集合重建卡片并复位结果
+    state.results = {};
+    renderCards();
   });
+  // 改模型名后，未手改的请求体模板用新模型重建（手改过的保留），并复位旧结果
+  $('#model').addEventListener('change', () => { state.results = {}; renderCards(); });
   $('#runBtn').onclick = runAll;
   $('#summaryBtn').onclick = doSummary;
   $('#shareBtn').onclick = doShare;
-  $('#freeSend').onclick = freeSend;
-  $('#freeAnalyze').onclick = freeAnalyze;
 }
 
 function cfg() {
@@ -218,6 +190,13 @@ function extraHeaders() {
  */
 function renderCards() {
   const box = $('#cards');
+  // 重建前保留用户手动改过的请求体（按探针 id 记忆 .touched 的 textarea），
+  // 这样切换模型/深度/勾选项重建卡片时，不会冲掉用户的自定义编辑。
+  const edited = {};
+  $$('#cards .probe-card').forEach((card) => {
+    const rb = card.querySelector('.reqBox');
+    if (rb && rb.dataset.touched) edited[card.dataset.id] = rb.value;
+  });
   box.innerHTML = '';
   // 顶部汇总行（运行后填充）
   const summary = document.createElement('div');
@@ -227,9 +206,64 @@ function renderCards() {
   box.appendChild(summary);
   const probes = selectedProbes();
   for (const probe of probes) {
-    box.appendChild(buildCard(probe));
+    const card = buildCard(probe);
+    if (edited[probe.id] !== undefined) {
+      const rb = card.querySelector('.reqBox');
+      rb.value = edited[probe.id];
+      rb.dataset.touched = '1';
+    }
+    box.appendChild(card);
   }
+  renderCardsNav();
   updateOverview();
+}
+
+/* ---------------- 左侧目录导航（顺序指引 + 一键跳转） ----------------
+ * 按当前选中探针顺序列出；点击 → 平滑滚动到对应卡片并自动展开请求/响应。
+ * 每项左侧色点随检测进度更新（未运行/运行中/真/存疑/假/严重/不适用）。
+ */
+function renderCardsNav() {
+  const nav = $('#cardsNav');
+  if (!nav) return;
+  const probes = selectedProbes();
+  nav.innerHTML = '<div class="nav-title">检测项目录</div>' + probes.map((p, i) => `
+    <button class="nav-item" data-id="${p.id}">
+      <span class="nav-dot"></span>
+      <span class="nav-idx">${i + 1}</span>
+      <span class="nav-name" title="${core.esc(p.name)}">${core.esc(p.name)}</span>
+    </button>`).join('');
+  nav.querySelectorAll('.nav-item').forEach((it) => { it.onclick = () => focusCard(it.dataset.id); });
+  // 回填已有结果的状态点（重建目录时不丢失已跑出的状态）
+  for (const [id, r] of Object.entries(state.results)) setNavStatus(id, navClsOf(r.result));
+}
+
+/* 结果 → 目录状态类（与卡片徽标配色一致） */
+function navClsOf(result) {
+  if (!result) return '';
+  if (result.status === 'error') return 'warn';
+  if (result.status === 'skip') return 'skip';
+  if (result.severity === 'critical') return 'crit';
+  return core.verdictBadge(result).cls;
+}
+
+function setNavStatus(id, cls) {
+  const it = $(`#cardsNav .nav-item[data-id="${id}"]`);
+  if (!it) return;
+  it.classList.remove('running', 'pass', 'warn', 'fail', 'crit', 'na', 'skip');
+  if (cls) it.classList.add(cls);
+}
+
+/* 跳转到指定探针卡片：展开（去 compact/prerun）+ 打开请求/响应 + 平滑滚动 + 高亮闪一下 */
+function focusCard(id) {
+  const card = $(`#cards .probe-card[data-id="${id}"]`);
+  if (!card) return;
+  card.classList.remove('compact', 'prerun');
+  const io = card.querySelector('.io-detail');
+  if (io) io.open = true;
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.classList.remove('flash');
+  void card.offsetWidth;   // 强制重排以重启动画
+  card.classList.add('flash');
 }
 
 function buildCard(probe) {
@@ -272,6 +306,9 @@ function buildCard(probe) {
     card.classList.toggle('compact');
   };
   card.querySelector('.sendOne').onclick = (e) => { e.stopPropagation(); runOne(probe, card); };
+  // 标记用户是否手动改过请求体：改过的在重建卡片时保留，不被新模型模板冲掉。
+  const reqBox = card.querySelector('.reqBox');
+  if (reqBox) reqBox.addEventListener('input', () => { reqBox.dataset.touched = '1'; });
   return card;
 }
 
@@ -279,6 +316,7 @@ function buildCard(probe) {
 async function runOne(probe, card) {
   const badge = card.querySelector('.vbadge');
   badge.className = 'vbadge skip'; badge.innerHTML = '<span class="spinner"></span> 运行中';
+  setNavStatus(probe.id, 'running');
   const reqBox = card.querySelector('.reqBox');
   const parsed = core.parseJsonLoose(reqBox.value);
   if (!parsed.ok) { setResult(card, { status: 'error', diffs: ['请求体不是合法 JSON: ' + parsed.error] }, probe); return; }
@@ -306,7 +344,7 @@ async function runOne(probe, card) {
  */
 async function executeProbe(probe, payload) {
   const c = cfg(), eh = extraHeaders();
-  const base = { model: $('#model').value.trim(), scenario: state.scenario, requestPayload: payload, shared: sharedCtx(), httpStatus: 0, headers: {}, body: '', json: null };
+  const base = { model: $('#model').value.trim(), requestPayload: payload, shared: sharedCtx(), httpStatus: 0, headers: {}, body: '', json: null };
 
   const send = async (pl) => {
     const r = await core.proxyFetch(c, pl, eh);
@@ -316,10 +354,15 @@ async function executeProbe(probe, payload) {
 
   if (probe.multi) {
     const runs = [];
+    const rounds = [];
     const n = state.mode === 'Q' ? 1 : probe.multi;
     let last;
-    for (let i = 0; i < n; i++) { last = await send(payload); if (last.json) runs.push(last.json); }
-    return { ...base, httpStatus: last.raw.httpStatus, headers: last.raw.headers, body: last.raw.body, json: last.json, multiJson: runs };
+    for (let i = 0; i < n; i++) {
+      last = await send(payload);
+      if (last.json) runs.push(last.json);
+      rounds.push({ label: `第 ${i + 1} 轮`, body: last.raw.body, httpStatus: last.raw.httpStatus, id: last.json?.id });
+    }
+    return { ...base, httpStatus: last.raw.httpStatus, headers: last.raw.headers, body: last.raw.body, json: last.json, multiJson: runs, rounds };
   }
   if (probe.tokenPair) {
     const short = await send(payload);
@@ -329,14 +372,20 @@ async function executeProbe(probe, payload) {
     // 可选官方 count
     let officialInputTokens = null;
     if (state.protocol === 'anthropic') officialInputTokens = await tryOfficialCount(payload);
-    return { ...base, httpStatus: short.raw.httpStatus, headers: short.raw.headers, body: short.raw.body, json: short.json, shortJson: short.json, longJson: long?.json, officialInputTokens };
+    const rounds = [{ label: '短请求', body: short.raw.body, httpStatus: short.raw.httpStatus, id: short.json?.id }];
+    if (long) rounds.push({ label: '长请求(追加文本)', body: long.raw.body, httpStatus: long.raw.httpStatus, id: long.json?.id });
+    return { ...base, httpStatus: short.raw.httpStatus, headers: short.raw.headers, body: short.raw.body, json: short.json, shortJson: short.json, longJson: long?.json, officialInputTokens, rounds };
   }
   if (probe.dualStream) {
     const ns = await send(payload);
     const streamPayload = { ...payload, stream: true };
     const st = await send(streamPayload);
     const sse = st.raw.body && /data:/.test(st.raw.body) ? core.parseSSE(st.raw.body) : null;
-    return { ...base, httpStatus: ns.raw.httpStatus, headers: ns.raw.headers, body: ns.raw.body, json: ns.json, nonStreamJson: ns.json, streamMessage: sse?.message };
+    const rounds = [
+      { label: '非流式', body: ns.raw.body, httpStatus: ns.raw.httpStatus, id: ns.json?.id },
+      { label: '流式(SSE)', body: st.raw.body, httpStatus: st.raw.httpStatus, id: sse?.message?.id },
+    ];
+    return { ...base, httpStatus: ns.raw.httpStatus, headers: ns.raw.headers, body: ns.raw.body, json: ns.json, nonStreamJson: ns.json, streamMessage: sse?.message, rounds };
   }
   // stream 或普通
   const r = await send(payload);
@@ -387,16 +436,32 @@ function setResult(card, result, probe, ctx) {
   if (ctx) {
     const meta = card.querySelector('.resp-meta');
     const codeCls = ctx.httpStatus >= 200 && ctx.httpStatus < 300 ? 'code-ok' : 'code-bad';
-    meta.innerHTML = `HTTP <span class="${codeCls}">${ctx.httpStatus}</span>` + (ctx.requestId ? ` · request-id: ${core.esc(ctx.requestId)}` : '') + (ctx.json?.id ? ` · id: ${core.esc(ctx.json.id)}` : '');
     const pre = card.querySelector('.respBox');
     pre.classList.remove('muted');
-    pre.textContent = ctx.body ? core.pretty(ctx.body) : '(空响应)';
+    // 多轮探针（缓存/一致性/Token 计费/流式对照等）：把每一轮请求的响应都展示出来，
+    // 而不是只显示最后一轮，便于核对「第一轮创建缓存 → 第二轮命中缓存」这类跨轮证据。
+    const rounds = Array.isArray(ctx.rounds) ? ctx.rounds : null;
+    if (rounds && rounds.length > 1) {
+      meta.innerHTML = `${rounds.length} 轮请求 · ` + rounds.map((r) => {
+        const cls = r.httpStatus >= 200 && r.httpStatus < 300 ? 'code-ok' : 'code-bad';
+        return `${core.esc(r.label)} <span class="${cls}">${r.httpStatus}</span>`;
+      }).join(' · ');
+      pre.textContent = rounds.map((r) =>
+        `──────── ${r.label}　HTTP ${r.httpStatus}${r.id ? '　id: ' + r.id : ''} ────────\n`
+        + (r.body ? core.pretty(r.body) : '(空响应)')
+      ).join('\n\n');
+    } else {
+      meta.innerHTML = `HTTP <span class="${codeCls}">${ctx.httpStatus}</span>` + (ctx.requestId ? ` · request-id: ${core.esc(ctx.requestId)}` : '') + (ctx.json?.id ? ` · id: ${core.esc(ctx.json.id)}` : '');
+      pre.textContent = ctx.body ? core.pretty(ctx.body) : '(空响应)';
+    }
   }
   const ana = card.querySelector('.pc-analysis');
   ana.style.display = '';
   const fUl = ana.querySelector('.feats ul'), dUl = ana.querySelector('.diffs ul');
   fUl.innerHTML = (result.features || []).map((f) => `<li>${core.esc(f)}</li>`).join('') || '<li class="muted">无</li>';
   dUl.innerHTML = (result.diffs || []).map((d) => `<li>${core.esc(d)}</li>`).join('') || '<li class="muted">无差异</li>';
+  // 同步左侧目录的状态色点
+  if (probe) setNavStatus(probe.id, navClsOf(result));
 }
 
 /* 运行后整理卡片：异常项置顶 + 顶部汇总（正常项保持紧凑折叠） */
@@ -442,6 +507,9 @@ async function runAll() {
   if (!cfg().targetUrl) { toast('请先填写接口地址'); return; }
   const btn = $('#runBtn'); btn.disabled = true; btn.textContent = '检测中…';
   state.results = {};
+  // 重新检测：用当前「模型 / 检测深度 / 勾选项」从头重建卡片（保留手改的请求体），
+  // 既保证请求用的是最新模型名，也让每次检测都从干净状态开始。
+  renderCards();
   const cards = $$('#cards .probe-card');
   const probes = selectedProbes();
   const cardOf = (probe) => cards.find((c) => c.dataset.id === probe.id);
@@ -537,58 +605,6 @@ async function doShare() {
     toast(`分享链接已复制（${r.mode === 'short' ? '短链接' : '静态链接'}）：${r.url}`);
     window.open(r.url, '_blank');
   } else toast('分享失败');
-}
-
-/* ---------------- 自由请求 / 手动核对 ---------------- */
-async function freeSend() {
-  const reqBox = $('#freeReq');
-  const parsed = core.parseJsonLoose(reqBox.value);
-  if (!parsed.ok) { toast('请求体不是合法 JSON: ' + parsed.error); return; }
-  if (!cfg().targetUrl) { toast('请先填写接口地址'); return; }
-  $('#freeSend').innerHTML = '<span class="spinner"></span>';
-  try {
-    const r = await core.proxyFetch(cfg(), parsed.value, extraHeaders());
-    $('#freeResp').value = r.body ? core.pretty(r.body) : ('(无响应) ' + (r.error || ''));
-    freeAnalyze();
-  } catch (e) { toast('请求失败: ' + e.message); }
-  $('#freeSend').textContent = '发送';
-}
-
-function freeAnalyze() {
-  const txt = $('#freeResp').value;
-  const parsed = core.parseJsonLoose(txt);
-  const ana = $('#freeAnalysis');
-  ana.style.display = '';
-  const fUl = ana.querySelector('.feats ul'), dUl = ana.querySelector('.diffs ul');
-  if (!parsed.ok) { fUl.innerHTML = '<li class="muted">响应不是合法 JSON</li>'; dUl.innerHTML = ''; return; }
-  const j = parsed.value;
-  const features = [], diffs = [];
-  // 渠道
-  const ch = core.detectChannelById(j.id);
-  features.push(`响应 id: ${j.id || '(无)'} → ${ch.channel}`);
-  if (ch.critical) diffs.push('id 前缀非官方格式 → 疑似套壳');
-  // 思考签名
-  const tb = (j.content || []).filter((c) => c.type === 'thinking' || c.type === 'redacted_thinking');
-  if (tb.length) {
-    const sl = (tb[0].signature || '').length;
-    features.push(`thinking 块 ${tb.length} 个，signature 长度 ${sl}`);
-    if (sl < 50) diffs.push('签名缺失/过短 → 思考链可疑');
-  }
-  // usage 官方结构
-  if (j.usage?.cache_creation) features.push('含 cache_creation 嵌套结构 ✓');
-  if (j.usage?.service_tier) features.push(`service_tier=${j.usage.service_tier}`);
-  if ('inference_geo' in (j.usage || {})) features.push(`inference_geo=${j.usage.inference_geo}`);
-  if (j.context_management) features.push('含 context_management ✓');
-  // 联网
-  if ((j.content || []).some((c) => c.type === 'web_search_tool_result')) features.push('含官方联网结构 ✓');
-  // OpenAI 兼容
-  if (j.object === 'chat.completion') {
-    features.push('OpenAI 兼容响应 (chat.completion)');
-    const u = j.usage || {};
-    if (Object.keys(u).some((k) => k.startsWith('claude_'))) diffs.push('usage 含 claude_* → Claude 套壳');
-  }
-  fUl.innerHTML = features.map((f) => `<li>${core.esc(f)}</li>`).join('') || '<li class="muted">无</li>';
-  dUl.innerHTML = diffs.map((d) => `<li>${core.esc(d)}</li>`).join('') || '<li class="muted">无差异</li>';
 }
 
 /* ---------------- toast ---------------- */

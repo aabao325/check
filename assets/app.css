@@ -210,6 +210,7 @@ details.adv summary:hover { color: var(--ink); }
   border: 1px solid var(--line);
 }
 .badge.anthropic { background: rgba(217,119,87,.12); color: var(--claude); border-color: var(--claude); }
+.badge.claudecode { background: rgba(217,119,87,.12); color: var(--claude); border-color: var(--claude); border-left: 3px solid var(--claude); font-weight: 700; }
 .badge.bedrock   { background: rgba(66,133,244,.12); color: var(--gemini); border-color: var(--gemini); }
 .badge.vertex    { background: rgba(16,163,127,.12); color: var(--codex);  border-color: var(--codex); }
 .badge.openai_shape, .badge.foreign { background: rgba(192,57,43,.10); color: var(--crit); border-color: var(--crit); }
@@ -221,7 +222,41 @@ details.adv summary:hover { color: var(--ink); }
 }
 
 /* ---------- 探针卡片 ---------- */
-.probe-card { border-left: 3px solid var(--line); }
+/* 卡片区正文恢复全宽；目录改为固定悬浮在正文（居中 .wrap 最大 1080px）左侧的留白处 */
+.cards-layout { display: block; }
+.cards-nav {
+  position: fixed; top: 84px;
+  /* 50vw 为视口中线；正文半宽 540px；再左移 208px(目录宽 188 + 间距 20) 落到左侧留白 */
+  left: calc(50vw - 540px - 208px);
+  width: 188px; max-height: calc(100vh - 104px); overflow-y: auto; z-index: 5;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 8px; font-size: 12.5px; box-shadow: 0 8px 24px -16px rgba(20,17,12,.25);
+}
+.cards-nav:empty { display: none; }
+.cards-nav .nav-title { font-weight: 700; color: var(--ink-soft); padding: 4px 8px 8px; font-size: 12px; }
+.nav-item {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 6px 8px; margin: 1px 0; border: none; background: transparent; border-radius: 7px;
+  text-align: left; cursor: pointer; color: var(--ink-soft); line-height: 1.3; font-size: 12.5px;
+}
+.nav-item:hover { background: var(--paper-2); color: var(--ink); }
+.nav-idx { color: var(--ink-faint); font-variant-numeric: tabular-nums; min-width: 1.5em; text-align: right; }
+.nav-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); opacity: .4; }
+.nav-item.running .nav-dot { background: var(--warn); opacity: 1; animation: navpulse 1s ease-in-out infinite; }
+.nav-item.pass .nav-dot { background: var(--pass); opacity: 1; }
+.nav-item.warn .nav-dot { background: var(--warn); opacity: 1; }
+.nav-item.fail .nav-dot, .nav-item.crit .nav-dot { background: var(--fail); opacity: 1; }
+.nav-item.crit { color: var(--crit); font-weight: 600; }
+.nav-item.na .nav-dot, .nav-item.skip .nav-dot { background: var(--na); opacity: .8; }
+@keyframes navpulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+/* 窗口不够宽（左侧留白放不下目录）时隐藏，避免压到正文 */
+@media (max-width: 1499px) { .cards-nav { display: none; } }
+
+.probe-card { border-left: 3px solid var(--line); scroll-margin-top: 12px; }
+/* 目录点击跳转时短暂高亮，提示当前定位的卡片 */
+.probe-card.flash { animation: cardflash 1.1s ease; }
+@keyframes cardflash { 0% { box-shadow: 0 0 0 3px var(--gemini); } 100% { box-shadow: 0 0 0 0 rgba(66,133,244,0); } }
 /* 未运行的探针默认完全隐藏，只有运行出结果后才显示 */
 .probe-card.prerun { display: none; }
 .probe-card.pass { border-left-color: var(--pass); }

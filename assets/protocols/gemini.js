@@ -3,14 +3,14 @@
  * 吸收 veridrop gemini detectors。注意 Gemini 3 默认开 thinking，
  * max_completion_tokens 要留余量（384），token 容差更宽。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js';
+import { coefficientOfVariation } from '../core.js?v=7';
 
 function choiceText(j) { return j?.choices?.[0]?.message?.content || ''; }
 function fail(reason, score = 0) { return { features: [], diffs: [reason], score, verdict: '假', status: 'done' }; }
 
 const basic_request = {
   id: 'basic_request', name: '基础可用', weight: 15, modes: ['Q', 'S', 'F'],
-  defaultPayload: (m) => ({ model: m, max_completion_tokens: 64, temperature: 0, messages: [{ role: 'user', content: 'Reply with exactly: pong' }] }),
+  defaultPayload: (m) => ({ model: m, max_completion_tokens: 64, messages: [{ role: 'user', content: 'Reply with exactly: pong' }] }),
   analyze(ctx) {
     const text = choiceText(ctx.json).toLowerCase();
     const features = [`回复: "${choiceText(ctx.json).slice(0, 40)}"`];
@@ -22,7 +22,7 @@ const basic_request = {
 
 const model_info = {
   id: 'model_info', name: '模型一致性', weight: 15, modes: ['Q', 'S', 'F'], multi: 3,
-  defaultPayload: (m) => ({ model: m, max_completion_tokens: 60, temperature: 0, messages: [{ role: 'user', content: 'In one sentence, explain HTTP status 418.' }] }),
+  defaultPayload: (m) => ({ model: m, max_completion_tokens: 60, messages: [{ role: 'user', content: 'In one sentence, explain HTTP status 418.' }] }),
   analyze(ctx) {
     const runs = ctx.multiJson || (ctx.json ? [ctx.json] : []);
     if (!runs.length) return fail('无响应');
@@ -101,7 +101,7 @@ const structured_output = {
 
 const token_usage = {
   id: 'token_usage', name: 'Token 计费', weight: 10, modes: ['S', 'F'], tokenPair: true,
-  defaultPayload: (m) => ({ model: m, max_completion_tokens: 16, temperature: 0, messages: [{ role: 'user', content: 'Reply with exactly: ok' }] }),
+  defaultPayload: (m) => ({ model: m, max_completion_tokens: 16, messages: [{ role: 'user', content: 'Reply with exactly: ok' }] }),
   analyze(ctx) {
     const s = ctx.shortJson || ctx.json, l = ctx.longJson;
     if (!s) return fail('无响应');
@@ -119,6 +119,6 @@ export const geminiProtocol = {
   id: 'gemini', name: 'Gemini', emoji: '🟢', icon: 'assets/icons/gemini.svg', authStyle: 'bearer',
   defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
   defaultModel: 'gemini-2.5-flash', endpointHint: '形如 https://你的中转站/v1/chat/completions',
-  betaHeader: '', scenarios: [],
+  betaHeader: '',
   probes: [basic_request, model_info, protocol, function_calling, structured_output, token_usage],
 };

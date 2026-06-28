@@ -8,29 +8,46 @@
  *      安装并开启 PHP 的 curl 扩展即可。详见「部署说明.md」。
  */
 
-// ===================== 管理员需要填写的配置 =====================
+// ===================== 配置加载（令牌等放在独立配置文件，更新代码不丢失） =====================
+// 所有可自定义项（GLM 令牌、官方 count key、品牌位、超时）都放在 api/config.php。
+// 复制 api/config.example.php 为 api/config.php 后填写；更新代码时只覆盖源码，
+// 不要覆盖你的 api/config.php，令牌就不会被冲掉。
+// 取值优先级：服务器环境变量(getenv) > api/config.php > api/config.example.php > 内置默认。
+// 说明：用 .php 配置文件（而非 .env 纯文本）是为安全——直接用浏览器访问 config.php
+//      会被 PHP 执行、只返回数组、不输出任何内容，令牌不会泄露。
 
-// 智谱 GLM 的 API Key（用于「生成 AI 总结报告」）。
-// 去 https://open.bigmodel.cn/ 申请，填到这里。留空则总结功能回退到本地规则。
-const GLM_KEY   = 'sk-xxx';                 // ← 改成你的智谱 key
-const GLM_MODEL = 'glm-4.7-flash';            // 免费款；若智谱更新型号名，改这里
-const GLM_URL   = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+$__cfg = [];
+foreach ([__DIR__ . '/config.php', __DIR__ . '/config.example.php'] as $__f) {
+    if (is_file($__f)) {
+        $__loaded = require $__f;       // 优先用第一个存在的（config.php 优先）
+        if (is_array($__loaded)) { $__cfg = $__loaded; }
+        break;
+    }
+}
 
-// （可选）Anthropic 官方 count_tokens 用的 key，用于精确核对中转站上报的 input_tokens。
-// 没有就留空，token 探针会跳过这一项精确核对。
-const OFFICIAL_COUNT_KEY = '';              // 形如 sk-ant2-xxx
-const OFFICIAL_BASE_URL  = 'https://api.anthropic.com';
+/** 取配置：同名环境变量优先，其次配置文件，最后默认值。 */
+function cfg_get($cfg, $key, $default) {
+    $env = getenv($key);
+    if ($env !== false && $env !== '') { return $env; }
+    return (isset($cfg[$key]) && $cfg[$key] !== '') ? $cfg[$key] : $default;
+}
 
-// 分享报告里的「品牌广告位」——管理员自填。报告页顶栏、页脚、PNG 水印都会显示。
-const SITE_NAME   = '公益 AI 检测站';
-const SITE_URL    = 'https://www.aabao.ai';   // ← 改成你的官网
-const SITE_SLOGAN = '一键鉴别 Claude / OpenAI / Gemini 中转站真伪';
+define('GLM_KEY',            cfg_get($__cfg, 'GLM_KEY', ''));
+define('GLM_MODEL',          cfg_get($__cfg, 'GLM_MODEL', 'glm-4.7-flash'));
+define('GLM_URL',            cfg_get($__cfg, 'GLM_URL', 'https://open.bigmodel.cn/api/paas/v4/chat/completions'));
 
-// 分享报告保存目录（相对本文件所在的 api/ 的上一级）。需要可写权限。
-const DATA_DIR = __DIR__ . '/../data';
+define('OFFICIAL_COUNT_KEY', cfg_get($__cfg, 'OFFICIAL_COUNT_KEY', ''));
+define('OFFICIAL_BASE_URL',  cfg_get($__cfg, 'OFFICIAL_BASE_URL', 'https://api.anthropic.com'));
+
+define('SITE_NAME',          cfg_get($__cfg, 'SITE_NAME', '公益 AI 检测站'));
+define('SITE_URL',           cfg_get($__cfg, 'SITE_URL', 'https://www.aabao.ai'));
+define('SITE_SLOGAN',        cfg_get($__cfg, 'SITE_SLOGAN', '一键鉴别 Claude / OpenAI / Gemini 中转站真伪'));
 
 // 转发探针请求的超时（秒）。长上下文探针可能很慢，这里给宽一点。
-const PROBE_TIMEOUT = 240;
+define('PROBE_TIMEOUT',      (int) cfg_get($__cfg, 'PROBE_TIMEOUT', 240));
+
+// 分享报告保存目录（路径，非密钥；需可写权限）。可用环境变量 / 配置项 DATA_DIR 覆盖。
+define('DATA_DIR',           cfg_get($__cfg, 'DATA_DIR', __DIR__ . '/../data'));
 
 // ===================== 通用：CORS / 响应 =====================
 

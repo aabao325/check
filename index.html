@@ -3,13 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- 禁止缓存 HTML 文档本身：保证每次都拿到最新的 index.html，再由其引用带版本号的静态资源 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>御三家 API 真伪检测站 · 公益本地运行</title>
   <!-- Favicon：品牌渐变盾牌（与站点视觉统一） -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=3">
+  <link rel="stylesheet" href="assets/app.css?v=7">
 </head>
 <body>
 <div class="wrap">
@@ -62,11 +66,6 @@
       </div>
     </div>
 
-    <div class="field" id="scenarioRow">
-      <label>场景预设（仅 Claude）</label>
-      <div class="mode-btns" id="scenarioBtns"></div>
-    </div>
-
     <details class="adv">
       <summary>🔧 自定义检测项与高级设置</summary>
       <div style="margin-top:12px">
@@ -82,14 +81,8 @@
     </details>
   </div>
 
-  <!-- 视图切换：自动检测 / 手动检测 -->
-  <div class="view-switch" id="viewSwitch">
-    <button data-view="main" class="active">⚡ 自动检测</button>
-    <button data-view="offline">🛠️ 手动检测</button>
-  </div>
-
-  <!-- ============ 视图 1：自动检测 ============ -->
-  <div class="view active" id="view-main">
+  <!-- ============ 自动检测主区 ============ -->
+  <div id="view-main">
 
     <div class="card">
       <div class="muted" style="font-size:13px;margin-bottom:12px">
@@ -115,32 +108,10 @@
       <div class="summary-box" id="summaryBox" style="display:none;margin-top:14px"></div>
     </div>
 
-    <!-- 探针卡片 -->
-    <div id="cards"></div>
-  </div>
-
-  <!-- ============ 视图 2：手动检测 ============ -->
-  <div class="view" id="view-offline">
-    <div class="card">
-      <h2>🛠️ 自由请求 / 手动核对</h2>
-      <div class="muted" style="font-size:13px;margin-bottom:12px">
-        「手动检测」适合你<b>已经有一段响应</b>、不需要自动发请求：直接把响应 JSON 粘到右侧点「分析请求」，
-        即可识别渠道与特征（适合核对官方样本）。也可在左侧任意编写请求体后「发送」（用上方填好的接口地址与 Key），等价于一个内置特征识别的迷你 Apifox。
-      </div>
-      <div class="pc-io">
-        <div class="col">
-          <label>📤 自定义请求体 <button class="btn btn-ghost btn-sm" id="freeSend">发送</button></label>
-          <textarea id="freeReq" spellcheck="false" style="height:220px"></textarea>
-        </div>
-        <div class="col">
-          <label>📥 响应体（可直接粘贴） <button class="btn btn-ghost btn-sm" id="freeAnalyze">分析请求</button></label>
-          <textarea id="freeResp" spellcheck="false" style="height:220px"></textarea>
-        </div>
-      </div>
-      <div class="pc-analysis" id="freeAnalysis" style="display:none;margin-top:12px">
-        <div class="feats"><div class="feat-title">🔍 特征提取</div><ul></ul></div>
-        <div class="diffs"><div class="feat-title">⚠️ 差异</div><ul></ul></div>
-      </div>
+    <!-- 探针卡片 + 左侧目录导航（点击丝滑跳转并展开） -->
+    <div class="cards-layout">
+      <aside class="cards-nav" id="cardsNav" aria-label="检测项目录"></aside>
+      <div id="cards"></div>
     </div>
   </div>
 
@@ -164,7 +135,7 @@
     <div class="faq-a">题库由站点统一维护、写死在代码里（不开放用户自行添加，以防被针对性「刷题」绕过）；但<b>非常欢迎反馈题目建议</b>，请到开源仓库提 <a id="faqIssueLink" href="#" target="_blank" rel="noopener">GitHub Issue</a>。</div>
 
     <div class="faq-q">我的 API Key 安全吗？</div>
-    <div class="faq-a">Key 只在你本地浏览器与转发代理之间使用，<b>不写入任何数据库</b>。代理仅做一次性转发以绕过浏览器跨域限制。介意的话也可以用「手动检测」：完全不发请求，只分析你贴进来的响应。</div>
+    <div class="faq-a">Key 只在你本地浏览器与转发代理之间使用，<b>不写入任何数据库</b>。代理仅做一次性转发以绕过浏览器跨域限制。所有特征判定逻辑都在你本地前端运行、开源可查。</div>
   </div>
 
   <!-- ============ 页脚：透明度声明 / 致谢 / 开源（第5c） ============ -->
@@ -184,6 +155,6 @@
   </div>
 </div>
 
-<script src="assets/app.js?v=4" type="module"></script>
+<script src="assets/app.js?v=7" type="module"></script>
 </body>
 </html>

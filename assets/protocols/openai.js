@@ -2,7 +2,7 @@
  * protocols/openai.js —— OpenAI 协议探针集（Chat Completions / chatcmpl-）
  * 吸收 veridrop openai detectors。核心探针已实现，可端到端跑。
  * ===================================================================== */
-import { validateSchema, coefficientOfVariation } from '../core.js';
+import { validateSchema, coefficientOfVariation } from '../core.js?v=7';
 
 const GEMINI_USAGE_MARKERS = ['candidates_token_count', 'prompt_token_count', 'thoughts_token_count', 'cached_content_token_count'];
 
@@ -15,7 +15,7 @@ function fail(reason, score = 0, severity = '') {
 
 const basic_request = {
   id: 'basic_request', name: '基础可用', weight: 15, modes: ['Q', 'S', 'F'],
-  defaultPayload: (m) => ({ model: m, max_completion_tokens: 96, temperature: 0, messages: [{ role: 'user', content: 'Reply only with the single word: pong' }] }),
+  defaultPayload: (m) => ({ model: m, max_completion_tokens: 96, messages: [{ role: 'user', content: 'Reply only with the single word: pong' }] }),
   analyze(ctx) {
     const j = ctx.json; if (!j) return fail('无响应');
     const text = choiceText(j).toLowerCase();
@@ -30,7 +30,7 @@ const basic_request = {
 
 const model_consistency = {
   id: 'model_consistency', name: '模型一致性(防掺假)', weight: 15, modes: ['Q', 'S', 'F'], multi: 3,
-  defaultPayload: (m) => ({ model: m, max_completion_tokens: 60, temperature: 0, messages: [{ role: 'user', content: 'In one sentence, explain HTTP status 418.' }] }),
+  defaultPayload: (m) => ({ model: m, max_completion_tokens: 60, messages: [{ role: 'user', content: 'In one sentence, explain HTTP status 418.' }] }),
   analyze(ctx) {
     const runs = ctx.multiJson || (ctx.json ? [ctx.json] : []);
     if (!runs.length) return fail('无响应');
@@ -119,7 +119,7 @@ const structured_output = {
 
 const token_billing = {
   id: 'token_billing', name: 'Token 计费', weight: 10, modes: ['S', 'F'], tokenPair: true,
-  defaultPayload: (m) => ({ model: m, max_completion_tokens: 16, temperature: 0, messages: [{ role: 'user', content: 'Reply with exactly: ok' }] }),
+  defaultPayload: (m) => ({ model: m, max_completion_tokens: 16, messages: [{ role: 'user', content: 'Reply with exactly: ok' }] }),
   analyze(ctx) {
     const s = ctx.shortJson || ctx.json, l = ctx.longJson;
     if (!s) return fail('无响应');
@@ -143,6 +143,6 @@ export const openaiProtocol = {
   id: 'openai', name: 'OpenAI', emoji: '🔵', icon: 'assets/icons/openai.svg', authStyle: 'bearer',
   defaultEndpoint: 'https://api.openai.com/v1/chat/completions',
   defaultModel: 'gpt-5', endpointHint: '形如 https://你的中转站/v1/chat/completions',
-  betaHeader: '', scenarios: [],
+  betaHeader: '',
   probes: [basic_request, model_consistency, protocol, function_calling, structured_output, token_billing],
 };

@@ -3,7 +3,7 @@
  * 吸收 veridrop gemini detectors。注意 Gemini 3 默认开 thinking，
  * max_completion_tokens 要留余量（384），token 容差更宽。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=7';
+import { coefficientOfVariation } from '../core.js?v=9';
 
 function choiceText(j) { return j?.choices?.[0]?.message?.content || ''; }
 function fail(reason, score = 0) { return { features: [], diffs: [reason], score, verdict: '假', status: 'done' }; }

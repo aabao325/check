@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=7">
+  <link rel="stylesheet" href="assets/app.css?v=9">
 </head>
 <body>
 <div class="wrap">
@@ -22,7 +22,7 @@
   <div class="topbar">
     <div>
       <h1><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" style="vertical-align:-0.12em;margin-right:.12em" aria-hidden="true"><defs><linearGradient id="hsg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4285F4"/><stop offset="33%" stop-color="#9B72CB"/><stop offset="66%" stop-color="#EA4986"/><stop offset="100%" stop-color="#FF8A3D"/></linearGradient></defs><path d="M12 1.6 20.4 4.9V11c0 5.3-3.6 9.4-8.4 11.3C7.2 20.4 3.6 16.3 3.6 11V4.9Z" fill="url(#hsg)"/><path d="M8 12.1l2.7 2.7L16.2 9" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg> 御三家 API <span class="accent">真伪检测站</span></h1>
-      <div class="sub">一键鉴别 Claude / OpenAI / Gemini 中转站真伪 —— 掺假冒充、协议篡改、能力降级、隐藏提示词注入，逐项可见、有理有据。</div>
+      <div class="sub">一键鉴别 OpenAI / Claude / Gemini 中转站真伪 —— 掺假冒充、协议篡改、能力降级、隐藏提示词注入，逐项可见、有理有据。</div>
     </div>
     <a class="btn btn-ghost btn-sm" href="../">↩ 返回主页</a>
   </div>
@@ -40,6 +40,23 @@
   <!-- 协议切换（两视图共享） -->
   <div class="proto-tabs" id="protoTabs"></div>
 
+  <!-- 配置库（右侧悬浮，与左侧「检测项目录」对称）：存当前接口/模型/Key/beta 到本地浏览器，
+       按御三家协议分别归类，定期复检一键导入。窗口不够宽时自动降级为顶部内联条。 -->
+  <aside class="cfg-store" id="cfgStore" aria-label="配置库">
+    <button class="cfg-store-head" id="cfgToggle" aria-expanded="true">
+      <span class="cfg-store-title">🗂️ 配置库<span class="muted" id="cfgProtoName"></span></span>
+      <span class="cfg-caret">▾</span>
+    </button>
+    <div class="cfg-store-body" id="cfgBody">
+      <div class="cfg-saved" id="cfgSaved"></div>
+      <div class="cfg-save-row">
+        <input id="cfgLabel" maxlength="40" placeholder="备注标签（如：中转站A）" autocomplete="off">
+        <button class="btn btn-primary btn-sm" id="cfgSaveBtn">💾 保存当前</button>
+      </div>
+      <div class="cfg-store-tip muted">含 Key，仅存于本机浏览器 · 不上传</div>
+    </div>
+  </aside>
+
   <!-- 输入区（两视图共享：模型 / 接口 / Key / 深度 / 高级设置） -->
   <div class="card">
     <div class="row">
@@ -54,7 +71,7 @@
     </div>
     <div class="field">
       <label>API Key</label>
-      <input id="apiKey" type="password" placeholder="sk-...（仅在你本地与代理之间使用，不保存）">
+      <input id="apiKey" type="password" placeholder="sk-...（默认不保存；可在右侧「配置库」一键存到本地浏览器，方便定期复检）">
     </div>
 
     <div class="field" id="modeRow">
@@ -148,13 +165,13 @@
     <div class="transparency">
       <b>透明度声明：</b>本站特征判定逻辑<b>全部前端开源、本地运行，不保存你的 Key 与检测数据</b>。
       <br>
-      <b>致谢：</b>思路参考并致谢开源项目
+      <b>致谢：</b>致谢开源项目
       <a href="https://github.com/canarybyte/veridrop" target="_blank" rel="noopener">veridrop</a> 与
       <a href="https://github.com/7836246/claude-detector" target="_blank" rel="noopener">claude-detector</a>。本站为公益项目，不对检测结论作任何担保，仅供自查参考。
     </div>
   </div>
 </div>
 
-<script src="assets/app.js?v=7" type="module"></script>
+<script src="assets/app.js?v=9" type="module"></script>
 </body>
 </html>

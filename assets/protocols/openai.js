@@ -2,7 +2,7 @@
  * protocols/openai.js —— OpenAI 协议探针集（Chat Completions / chatcmpl-）
  * 吸收 veridrop openai detectors。核心探针已实现，可端到端跑。
  * ===================================================================== */
-import { validateSchema, coefficientOfVariation } from '../core.js?v=7';
+import { validateSchema, coefficientOfVariation } from '../core.js?v=9';
 
 const GEMINI_USAGE_MARKERS = ['candidates_token_count', 'prompt_token_count', 'thoughts_token_count', 'cached_content_token_count'];
 

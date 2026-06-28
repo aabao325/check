@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=7';
-import { anthropicProtocol } from './protocols/anthropic.js?v=7';
-import { openaiProtocol } from './protocols/openai.js?v=7';
-import { geminiProtocol } from './protocols/gemini.js?v=7';
+import * as core from './core.js?v=9';
+import { anthropicProtocol } from './protocols/anthropic.js?v=9';
+import { openaiProtocol } from './protocols/openai.js?v=9';
+import { geminiProtocol } from './protocols/gemini.js?v=9';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -111,6 +111,7 @@ function selectProtocol(id) {
   renderProbeToggles();
   renderProbeDocs();
   renderCards();
+  renderConfigStore();   // 切协议 → 刷新该协议下的本地配置库
 }
 
 function renderProbeToggles() {
@@ -167,6 +168,14 @@ function bindControls() {
   $('#runBtn').onclick = runAll;
   $('#summaryBtn').onclick = doSummary;
   $('#shareBtn').onclick = doShare;
+  // 配置库：保存按钮 + 备注框回车保存 + 折叠开关
+  $('#cfgSaveBtn').onclick = saveCurrentConfig;
+  $('#cfgLabel').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveCurrentConfig(); } });
+  $('#cfgToggle').onclick = () => {
+    const store = $('#cfgStore');
+    const collapsed = store.classList.toggle('collapsed');
+    $('#cfgToggle').setAttribute('aria-expanded', String(!collapsed));
+  };
 }
 
 function cfg() {
@@ -605,6 +614,152 @@ async function doShare() {
     toast(`分享链接已复制（${r.mode === 'short' ? '短链接' : '静态链接'}）：${r.url}`);
     window.open(r.url, '_blank');
   } else toast('分享失败');
+}
+
+/* ---------------- 配置库（本地保存接口/模型/Key/beta，按御三家协议归类） ----------------
+ * 全部存于浏览器 localStorage，不经过任何后端；按 state.protocol 分桶，
+ * 切到哪个协议只展示哪个协议的配置（御三家接口不同，互不混淆）。
+ * 数据形如：{ openai:[{label,endpoint,model,key,beta,ts}], anthropic:[...], gemini:[...] }
+ */
+const CFG_KEY = 'apicheck.savedConfigs.v1';
+const PROTO_NAMES = { openai: 'OpenAI', anthropic: 'Claude', gemini: 'Gemini' };
+
+function loadConfigStore() {
+  try {
+    const o = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+    return (o && typeof o === 'object') ? o : {};
+  } catch { return {}; }
+}
+function saveConfigStore(store) {
+  try { localStorage.setItem(CFG_KEY, JSON.stringify(store)); return true; }
+  catch { toast('保存失败：本地存储不可用或已满'); return false; }
+}
+function currentConfigs() {
+  const store = loadConfigStore();
+  return Array.isArray(store[state.protocol]) ? store[state.protocol] : [];
+}
+
+/* 把当前输入区表单存为一条配置（同协议下按备注标签去重覆盖） */
+function saveCurrentConfig() {
+  const endpoint = $('#endpoint').value.trim();
+  const model = $('#model').value.trim();
+  const key = $('#apiKey').value.trim();
+  const beta = $('#betaHeader').value.trim();
+  let label = $('#cfgLabel').value.trim();
+  if (!endpoint && !key) { toast('请先填写接口地址或 Key 再保存'); return; }
+  if (!label) label = (() => { try { return new URL(endpoint).host; } catch { return '未命名配置'; } })();
+
+  const store = loadConfigStore();
+  const list = Array.isArray(store[state.protocol]) ? store[state.protocol] : [];
+  const item = { label, endpoint, model, key, beta };
+  const i = list.findIndex((x) => x.label === label);
+  if (i >= 0) list[i] = item; else list.push(item);
+  store[state.protocol] = list;
+  if (saveConfigStore(store)) {
+    $('#cfgLabel').value = '';
+    renderConfigStore();
+    toast(i >= 0 ? `已更新「${label}」` : `已保存「${label}」到本地`);
+  }
+}
+
+/* 点击胶囊 → 把该配置导入当前输入区 */
+function loadConfig(idx) {
+  const list = currentConfigs();
+  const c = list[idx];
+  if (!c) return;
+  $('#endpoint').value = c.endpoint || '';
+  $('#model').value = c.model || '';
+  $('#apiKey').value = c.key || '';
+  if (state.protocol === 'anthropic') $('#betaHeader').value = c.beta || '';
+  // 模型可能变了 → 复位结果并按新模型重建卡片模板
+  state.results = {};
+  renderCards();
+  toast(`已导入「${c.label}」`);
+}
+
+function deleteConfig(idx) {
+  const store = loadConfigStore();
+  const list = Array.isArray(store[state.protocol]) ? store[state.protocol] : [];
+  const c = list[idx];
+  if (!c) return;
+  list.splice(idx, 1);
+  store[state.protocol] = list;
+  saveConfigStore(store);
+  renderConfigStore();
+  toast(`已删除「${c.label}」`);
+}
+
+/* 渲染当前协议下的配置胶囊列表 */
+function renderConfigStore() {
+  const nameEl = $('#cfgProtoName');
+  if (nameEl) nameEl.textContent = `· 当前 ${PROTO_NAMES[state.protocol] || ''} 配置`;
+  const box = $('#cfgSaved');
+  if (!box) return;
+  const list = currentConfigs();
+  if (!list.length) {
+    box.innerHTML = `<div class="cfg-empty">暂无已存配置。填好上方接口后，写个备注点「保存当前配置」即可。</div>`;
+    return;
+  }
+  box.innerHTML = list.map((c, i) => {
+    // 副标题只显示域名（/v1 之前的 host 部分），更简洁
+    const host = (() => { try { return new URL(c.endpoint).host; } catch { return c.endpoint || ''; } })();
+    return `<span class="cfg-chip">
+        <button class="cfg-chip-load" data-idx="${i}" title="点击导入到当前输入区">
+          <span class="cc-label">${core.esc(c.label)}</span>
+          ${host ? `<span class="cc-meta">${core.esc(host)}</span>` : ''}
+        </button>
+        <button class="cfg-chip-edit" data-idx="${i}" title="重命名备注">✎</button>
+        <button class="cfg-chip-del" data-idx="${i}" title="删除此配置">✕</button>
+      </span>`;
+  }).join('');
+  box.querySelectorAll('.cfg-chip-load').forEach((b) => { b.onclick = () => loadConfig(+b.dataset.idx); });
+  box.querySelectorAll('.cfg-chip-edit').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); startRename(+b.dataset.idx); }; });
+  box.querySelectorAll('.cfg-chip-del').forEach((b) => { b.onclick = () => deleteConfig(+b.dataset.idx); });
+}
+
+/* 行内重命名备注：把该胶囊的标签文字换成输入框，回车/失焦保存，Esc 取消 */
+function startRename(idx) {
+  const list = currentConfigs();
+  const c = list[idx];
+  if (!c) return;
+  const chip = $(`#cfgSaved .cfg-chip-load[data-idx="${idx}"]`)?.closest('.cfg-chip');
+  const labelEl = chip?.querySelector('.cc-label');
+  if (!labelEl) return;
+  // 已在编辑中则忽略
+  if (chip.querySelector('.cc-edit')) return;
+
+  const input = document.createElement('input');
+  input.className = 'cc-edit';
+  input.maxLength = 40;
+  input.value = c.label;
+  labelEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = (commit) => {
+    if (done) return; done = true;
+    if (commit) {
+      const next = input.value.trim();
+      if (next && next !== c.label) {
+        // 同协议下别名不可与其他配置重名
+        if (list.some((x, j) => j !== idx && x.label === next)) {
+          toast(`已存在备注「${next}」，换一个吧`);
+          renderConfigStore();
+          return;
+        }
+        const store = loadConfigStore();
+        const arr = Array.isArray(store[state.protocol]) ? store[state.protocol] : [];
+        if (arr[idx]) { arr[idx].label = next; store[state.protocol] = arr; saveConfigStore(store); toast(`已重命名为「${next}」`); }
+      }
+    }
+    renderConfigStore();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
 }
 
 /* ---------------- toast ---------------- */

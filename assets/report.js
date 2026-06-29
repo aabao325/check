@@ -2,7 +2,7 @@
  * report.js —— 分享报告查看页（只读）
  * 支持两种来源：?id=xxx（后端短链）/ #data=base64（静态分享）
  * ===================================================================== */
-import * as core from './core.js?v=16';
+import * as core from './core.js?v=19';
 
 const $ = (s) => document.querySelector(s);
 

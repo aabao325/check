@@ -6,7 +6,7 @@
  * 探针顺序：渠道识别(0)→身份识别(1)→…→参数检测(2)，身份判定的渠道（如 Codex CLI）
  * 写入 ctx.shared.channel 供 param_check 读取。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=16';
+import { coefficientOfVariation } from '../core.js?v=19';
 
 /* ---------- 小工具 ---------- */
 // 遍历 output 数组取最终文本：找 type==='message' 项里的 output_text；
@@ -94,14 +94,16 @@ const RIVAL_WORDS = ['claude', 'anthropic', 'gemini', 'bard', 'deepseek', 'qwen'
 const identity = {
   id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1,
   defaultPayload: (m) => ({
-    model: m, max_output_tokens: 600,
+    model: m, max_output_tokens: 2048,
     // 中性提问：不主动提及 Codex/任何渠道，避免把关键词喂给模型后又拿它来判定（自我污染）。
+    // 预算给足 2048：推理模型(如 gpt-5-nano)会先花大量 token 思考，预算太小会只产 reasoning 无文本。
     input: [{ role: 'user', content: '你究竟是谁？你的模型名称和版本是什么？由哪家公司开发？请简洁回答。' }],
   }),
   analyze(ctx) {
     const text = (outputText(ctx.json) || '').toLowerCase();
     if (!text || text.startsWith('[refusal]')) {
-      if (reasoningOnly(ctx.json)) return { features: ['仅产出 reasoning、无最终文本（预算耗尽？）'], diffs: ['未拿到身份自述'], score: 50, verdict: '存疑', severity: '', status: 'done' };
+      // 预算耗尽（只产 reasoning 无最终文本）→ 记「不适用」不计分，避免推理模型被误杀为假。
+      if (reasoningOnly(ctx.json)) return { features: ['仅产出 reasoning、无最终文本（max_output_tokens 预算耗尽）'], diffs: ['未拿到身份自述（预算耗尽，本项不计分；可调大 max_output_tokens 重试）'], score: null, verdict: '不适用', severity: '', status: 'done' };
       return fail('无文本回复');
     }
     const features = [];
@@ -147,7 +149,7 @@ const identity = {
 
 const basic_request = {
   id: 'basic_request', name: '基础可用', weight: 15, modes: ['Q', 'S', 'F'],
-  defaultPayload: (m) => ({ model: m, max_output_tokens: 512, input: [{ role: 'user', content: 'Reply only with the single word: pong' }] }),
+  defaultPayload: (m) => ({ model: m, max_output_tokens: 2048, input: [{ role: 'user', content: 'Reply only with the single word: pong' }] }),
   analyze(ctx) {
     const j = ctx.json; if (!j) return fail('无响应');
     const text = outputText(j).toLowerCase();
@@ -182,7 +184,7 @@ const protocol = {
 
 const model_consistency = {
   id: 'model_consistency', name: '模型一致性(防掺假)', weight: 15, modes: ['Q', 'S', 'F'], multi: 3,
-  defaultPayload: (m) => ({ model: m, max_output_tokens: 512, input: [{ role: 'user', content: 'In one sentence, explain HTTP status 418.' }] }),
+  defaultPayload: (m) => ({ model: m, max_output_tokens: 2048, input: [{ role: 'user', content: 'In one sentence, explain HTTP status 418.' }] }),
   analyze(ctx) {
     const runs = ctx.multiJson || (ctx.json ? [ctx.json] : []);
     if (!runs.length) return fail('无响应');
@@ -198,7 +200,9 @@ const model_consistency = {
     if (outs.length >= 2) {
       const cv = coefficientOfVariation(outs);
       features.push(`output_tokens: [${outs.join(', ')}], CV=${cv.toFixed(3)}`);
-      if (cv < 0.1) score += 40; else if (cv < 0.3) { score += 20; diffs.push('token 波动偏大'); } else diffs.push('token 高度不稳定 → 疑似轮询多模型');
+      // 推理模型 output_tokens（含思考）天然波动大，放宽阈值：CV<0.5 视为正常不扣分，
+      // 主防伪信号是 model 名一致（上面 +60）；只有极端波动(>0.8)才疑轮询多模型。
+      if (cv < 0.5) score += 40; else if (cv < 0.8) { score += 30; features.push('token 有波动，但推理模型属正常范围'); } else { score += 10; diffs.push('token 高度不稳定 → 疑似轮询多模型'); }
     } else score += 40;
     return { features, diffs, score, verdict: score >= 70 ? '真' : '假', status: 'done' };
   },
@@ -324,7 +328,7 @@ const param_min = {
 const function_calling = {
   id: 'function_calling', name: '函数调用', weight: 15, modes: ['S', 'F'],
   defaultPayload: (m) => ({
-    model: m, max_output_tokens: 512,
+    model: m, max_output_tokens: 2048,
     tools: [{ type: 'function', name: 'get_current_weather', description: 'Get current weather for a city.', strict: true, parameters: { type: 'object', properties: { city: { type: 'string' }, unit: { type: 'string', enum: ['celsius', 'fahrenheit'] } }, required: ['city', 'unit'], additionalProperties: false } }],
     tool_choice: { type: 'function', name: 'get_current_weather' },
     input: [{ role: 'user', content: 'Use get_current_weather for Boston, MA in celsius. Do not answer directly.' }],
@@ -333,7 +337,13 @@ const function_calling = {
     const out = ctx.json?.output;
     const features = [], diffs = []; let score = 0;
     const fc = Array.isArray(out) ? out.find((o) => o && o.type === 'function_call') : null;
-    if (!fc) return fail('output 中无 function_call → 工具能力可能被剥离');
+    if (!fc) {
+      // 预算耗尽（只产 reasoning、无 function_call 也无 message）→ 不适用不计分，而非判工具被剥离。
+      if (reasoningOnly(ctx.json) || ctx.json?.status === 'incomplete') {
+        return { features: ['未产出 function_call，且 status=incomplete（max_output_tokens 预算耗尽）'], diffs: ['预算耗尽，无法判断函数调用能力（本项不计分；可调大 max_output_tokens 重试）'], score: null, verdict: '不适用', severity: '', status: 'done' };
+      }
+      return fail('output 中无 function_call → 工具能力可能被剥离');
+    }
     const ck = (c, ok, bad) => { if (c) { score += 25; features.push(ok); } else diffs.push(bad); };
     ck(typeof fc.call_id === 'string' && fc.call_id.startsWith('call_'), `call_id 前缀 call_ ✓`, `call_id 异常: ${fc.call_id}`);
     ck(fc.name === 'get_current_weather', 'name 正确 ✓', `name 异常: ${fc.name}`);
@@ -347,13 +357,19 @@ const function_calling = {
 const structured_output = {
   id: 'structured_output', name: '结构化输出', weight: 15, modes: ['S', 'F'],
   defaultPayload: (m) => ({
-    model: m, max_output_tokens: 512,
+    model: m, max_output_tokens: 2048,
     text: { format: { type: 'json_schema', name: 'detector_result', strict: true, schema: { type: 'object', properties: { ok: { type: 'boolean' }, nonce: { type: 'string' } }, required: ['ok', 'nonce'], additionalProperties: false } } },
     input: [{ role: 'user', content: 'Return JSON matching the schema with ok=true and nonce="openai-detector".' }],
   }),
   analyze(ctx) {
     const text = outputText(ctx.json).trim();
-    if (!text || text.startsWith('[refusal]')) return fail('无输出');
+    if (!text || text.startsWith('[refusal]')) {
+      // 预算耗尽（只产 reasoning、无最终 JSON 文本）→ 不适用不计分，而非判结构化失败。
+      if (reasoningOnly(ctx.json) || ctx.json?.status === 'incomplete') {
+        return { features: ['未产出最终文本，status=incomplete（max_output_tokens 预算耗尽）'], diffs: ['预算耗尽，无法判断结构化输出能力（本项不计分；可调大 max_output_tokens 重试）'], score: null, verdict: '不适用', severity: '', status: 'done' };
+      }
+      return fail('无输出');
+    }
     const features = [], diffs = [];
     if (/```/.test(text)) diffs.push('被 markdown 代码块包裹 → 可能未透传 text.format');
     let parsed; try { parsed = JSON.parse(text.replace(/```json|```/g, '').trim()); } catch { return { features: [`输出: ${text.slice(0, 60)}`], diffs: ['非合法 JSON'], score: 20, verdict: '假', status: 'done' }; }
@@ -367,7 +383,7 @@ const structured_output = {
 
 const token_billing = {
   id: 'token_billing', name: 'Token 计费', weight: 10, modes: ['S', 'F'], tokenPair: true,
-  defaultPayload: (m) => ({ model: m, max_output_tokens: 512, input: [{ role: 'user', content: 'Reply with exactly: ok' }] }),
+  defaultPayload: (m) => ({ model: m, max_output_tokens: 2048, input: [{ role: 'user', content: 'Reply with exactly: ok' }] }),
   analyze(ctx) {
     const s = ctx.shortJson || ctx.json, l = ctx.longJson;
     if (!s) return fail('无响应');
@@ -432,14 +448,20 @@ const codex_verdict = {
       conclusion = '非官渠道（疑网关 / 逆向）';
       diffs.push('响应 id 像官方 resp_，但 max_output_tokens 未被精确截断+计费 → 上游可能是网关/逆向，未透传官方截断行为，请自行核实。');
       score = 30; verdict = '存疑';
-    } else if (identityCodex || injSuspected) {
-      // 官方协议特征成立 + 有注入信号（身份自述 codex 或 input_tokens 偏高）→ Codex CLI
+    } else if (identityCodex) {
+      // 官方协议特征成立 + 身份自述 codex（强证据）→ 确认 Codex CLI 渠道
       conclusion = 'Codex CLI 渠道';
-      const why = [];
-      if (identityCodex) why.push('身份自述含 codex');
-      if (injSuspected) why.push(`两句 input_tokens 偏高（A Δ${inj.deltaA} / B Δ${inj.deltaB}）`);
-      features.push(`官方协议特征齐全，但检出提示词注入：${why.join('、')} → Codex CLI（类似 Claude Code，经官方但注入了系统提示词）。`);
+      const why = ['身份自述含 codex'];
+      if (injSuspected) why.push(`且两句 input_tokens 偏高（A Δ${inj.deltaA} / B Δ${inj.deltaB}）佐证`);
+      features.push(`官方协议特征齐全 + ${why.join('，')} → 确认 Codex CLI（类似 Claude Code，经官方但注入了系统提示词）。`);
       score = 100; verdict = '真';
+    } else if (injSuspected) {
+      // 官方协议特征成立，但仅 input_tokens 偏高、身份问不出 codex：
+      // 只能证明「有人往请求里注入了提示词」，无法锚定就是 Codex（也可能是别的 CLI/网关）。
+      // 故降级为中性表述，判存疑，提示用户自行核实，不斩钉截铁说 Codex。
+      conclusion = '官方上游·疑提示词注入（待核实）';
+      diffs.push(`响应是官方 resp_ 且 max_output_tokens 行为正常，但两句 input_tokens 明显偏高（A Δ${inj.deltaA} / B Δ${inj.deltaB}）→ 上游被注入了系统提示词。可能是 Codex CLI、其它 CLI 工具或中转网关所为；因身份未自述 codex，无法确认具体来源，请自行核实。`);
+      score = 60; verdict = '存疑';
     } else {
       // 官方协议特征成立 + 无注入信号 → 纯官方直连
       conclusion = '纯官方直连';

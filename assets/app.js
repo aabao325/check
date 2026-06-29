@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=16';
-import { anthropicProtocol } from './protocols/anthropic.js?v=16';
-import { openaiProtocol } from './protocols/openai.js?v=16';
-import { geminiProtocol } from './protocols/gemini.js?v=16';
+import * as core from './core.js?v=19';
+import { anthropicProtocol } from './protocols/anthropic.js?v=19';
+import { openaiProtocol } from './protocols/openai.js?v=19';
+import { geminiProtocol } from './protocols/gemini.js?v=19';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -42,7 +42,7 @@ const PROBE_DESC = {
   model_info: '同一请求多次发送，检查响应 modelVersion 稳定、token 方差合理（防随机换模型）。',
   param_check: '参数强验真：发两条固定句（“我的指令是什么”官方恒 input_tokens=10 / “hi”）配 max_output_tokens=16。真官方会在思考阶段精确截断（status=incomplete、reason=max_output_tokens、output_tokens≈16 全为 reasoning_tokens）且 input_tokens 精确——非官/逆向难复现；两句 input_tokens 都偏高=疑似 Codex 注入了系统提示词。',
   param_min: '参数下限验真：发 max_output_tokens=1。真官方上游会报「需 >= 16」(integer_below_min_value)=验真正向信号；正常返回则结合身份——Codex 渠道不识别该字段属合理，否则可能网关忽略/逆向（不报错≠假，记“不适用”）。',
-  codex_verdict: '综合研判（信息项）：汇总渠道(resp_)、身份自述、max_output_tokens 精确截断计费、input_tokens 注入信号，给出「纯官方直连 / Codex CLI 渠道 / 非官渠道」明确结论。',
+  codex_verdict: '综合研判（信息项）：汇总渠道(resp_)、身份自述、max_output_tokens 精确截断计费、input_tokens 注入信号，给出结论。判 Codex CLI 需身份自述含 codex（强证据）；仅 input_tokens 偏高、身份问不出 codex 时只判「官方上游·疑提示词注入（待核实）」，不锚定具体来源。',
   thinking_probe: '思考能力 + 参数代际验真：发与模型代匹配的思考参数（3 系 thinkingLevel / 2.5 系 thinkingBudget），看 thoughtsTokenCount>0；对 2.5 系额外发新版参数验证官方会拒绝错代参数。',
   error_shape: '弃用参数验真：发 temperature/top_p（最新 Claude 已弃用）。真官方上游会报「不支持/已弃用」=验真正向信号；不报错≠假（网关可能静默忽略），记“不适用”，需自行与渠道商确认。',
   long_context: '长上下文真实性：植入暗号到约 32k/100k token 大文本，检查是否被截断。',
@@ -575,6 +575,9 @@ async function runAll() {
   if (!cfg().targetUrl) { toast('请先填写接口地址'); return; }
   const btn = $('#runBtn'); btn.disabled = true; btn.textContent = '检测中…';
   state.results = {};
+  // 清掉上一轮的 AI 总结，避免重新检测后旧总结还残留在界面上（与本轮结果不符）。
+  state.lastSummary = '';
+  const sb = $('#summaryBox'); if (sb) { sb.textContent = ''; sb.style.display = 'none'; }
   // 重新检测：用当前「模型 / 检测深度 / 勾选项」从头重建卡片（保留手改的请求体），
   // 既保证请求用的是最新模型名，也让每次检测都从干净状态开始。
   renderCards();
@@ -608,12 +611,36 @@ function updateOverview() {
     severity: result.severity, status: result.status, info: probe.info,
   }));
   const scored = items.filter((i) => !i.info); // 信息项不计入总分主体
-  const { total, level, verdict, hasCritical } = core.scoreTotal(scored.length ? scored : items);
+  let { total, level, verdict, hasCritical } = core.scoreTotal(scored.length ? scored : items);
   const ov = $('#overview');
   if (!items.length) { ov.style.display = 'none'; return; }
   ov.style.display = '';
 
-  const ch = sharedCtx().channel || { channel: '未知', code: 'unknown' };
+  let ch = sharedCtx().channel || { channel: '未知', code: 'unknown' };
+
+  // —— 综合研判（codex_verdict）是「元结论」：它对渠道真伪的判定可以否决 headline ——
+  // 否则会出现「研判=非官渠道，但总分仍 100、渠道仍显示官方」的自相矛盾。
+  const cvRes = state.results.codex_verdict?.result;
+  if (cvRes && cvRes.conclusion) {
+    const c = cvRes.conclusion;
+    if (cvRes.severity === 'critical') {
+      // 非官渠道（套壳/逆向）→ 硬否决：总分封顶 30、评级不可信、渠道改显研判结论
+      total = Math.min(total, 30);
+      level = 'fail'; verdict = '不可信（研判：' + c + '）'; hasCritical = true;
+      ch = { channel: c, code: 'foreign' };
+    } else if (cvRes.verdict === '存疑') {
+      // 疑网关/逆向、或疑提示词注入 → 总分压到「存疑」区间，渠道如实标注研判结论
+      total = Math.min(total, 50);
+      level = 'marginal'; verdict = '存疑（研判：' + c + '）';
+      ch = { channel: c, code: 'unknown' };
+    } else if (c === 'Codex CLI 渠道') {
+      // Codex 经官方上游、协议特征齐全：总分不封顶，但渠道如实显示为 Codex CLI
+      ch = { channel: 'Codex CLI', code: 'claudecode' };
+      if (level === 'excellent') verdict = '高度可信（Codex CLI 渠道）';
+    }
+    // 纯官方直连 → 不修正
+  }
+
   const colors = { excellent: 'var(--pass)', pass: 'var(--pass)', marginal: 'var(--warn)', fail: 'var(--fail)' };
   $('#ring').style.setProperty('--val', total);
   $('#ring').style.setProperty('--col', colors[level]);
@@ -687,19 +714,12 @@ async function doShare() {
     // 复制给用户的：无后缀干净版（线上伪静态 …/report?id=xxx，更专业）
     try { await navigator.clipboard.writeText(r.url); } catch { /* ignore */ }
     toast(`分享链接已复制（${r.mode === 'short' ? '短链接' : '静态链接'}）：${r.url}`);
-    // 我们自己打开预览的：带 .html 后缀版，不依赖伪静态，任何部署都能打开（用户看不到此 URL）
-    window.open(openableUrl(r.url), '_blank');
+    // 打开预览：优先用与剪贴板一致的「干净无后缀」版（线上配了伪静态可直接打开），
+    // 这样用户弹出的预览页地址栏与复制到的链接一致，不会看到 .html 而困惑；
+    // 仅当 #data= 退化长链时无所谓后缀。本地无伪静态打开干净版会 404——那是本地开发场景，
+    // 线上部署（已配 nginx try_files）正常。
+    window.open(r.url, '_blank');
   } else toast('分享失败');
-}
-
-/* 把无后缀分享链接转成带 .html 后缀的可直接打开版（仅用于 window.open 预览，不复制给用户）。
- * 兼容两种形态：短链 …/report?id=xxx → …/report.html?id=xxx；退化长链 …/report#data=… → …/report.html#data=… */
-function openableUrl(url) {
-  try {
-    const u = new URL(url);
-    if (u.pathname.endsWith('/report')) u.pathname += '.html';
-    return u.toString();
-  } catch { return url; }
 }
 
 /* ---------------- 配置库（本地保存接口/模型/Key/beta，按御三家协议归类） ----------------

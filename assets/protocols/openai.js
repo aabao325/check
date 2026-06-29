@@ -6,7 +6,7 @@
  * 探针顺序：渠道识别(0)→身份识别(1)→…→参数检测(2)，身份判定的渠道（如 Codex CLI）
  * 写入 ctx.shared.channel 供 param_check 读取。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=15';
+import { coefficientOfVariation } from '../core.js?v=16';
 
 /* ---------- 小工具 ---------- */
 // 遍历 output 数组取最终文本：找 type==='message' 项里的 output_text；
@@ -41,6 +41,24 @@ function isNegatedNearby(text, idx) {
 }
 function isResponsesError(j) {
   return j && j.error && typeof j.error === 'object';
+}
+
+/* ---------- max_output_tokens 强验真辅助 ---------- */
+// 「我的指令是什么」纯官方恒为 input_tokens=10；不同分词器留 2 容错。
+const BASE_A = 12; // 主句 input_tokens 容错上限
+const BASE_B = 10; // 对照句 "hi" input_tokens 容错上限（官方约 8）
+// 判断响应是否「在 max_output_tokens 处被精确截断」：
+// status=incomplete 且 incomplete_details.reason=max_output_tokens。
+function truncatedByMaxTokens(j) {
+  if (!j) return false;
+  const inc = j.status === 'incomplete';
+  const reason = j.incomplete_details && j.incomplete_details.reason;
+  return inc && reason === 'max_output_tokens';
+}
+// 取 usage.input_tokens（数字或 null）
+function inputTokensOf(j) {
+  const n = j?.usage?.input_tokens;
+  return typeof n === 'number' ? n : null;
 }
 
 /* ===================================================================== */
@@ -187,20 +205,98 @@ const model_consistency = {
 };
 
 const param_check = {
-  // 「报错」是正向验真信号；「不报错」不能判假——网关可能静默忽略 max_output_tokens，
-  // Codex CLI 也可能不识别该字段。故无官方报错时记「不适用」(score:null)，不计入总分。
-  id: 'param_check', name: '参数验真(max_output_tokens 下限)', weight: 10, modes: ['S', 'F'], errorProbe: true, stage: 2,
+  // max_output_tokens 强验真（双固定句对照）：
+  //  A=「我的指令是什么」(官方恒 input_tokens=10) + max_output_tokens:16
+  //  B=「hi」(官方约 8) + max_output_tokens:16
+  // 真官方：思考阶段就被精确截断（status=incomplete / reason=max_output_tokens / output_tokens≈16
+  //         全是 reasoning_tokens、无 message），且 input_tokens 精确 → 强验真 100。
+  // 两句 input_tokens 都偏高 → 疑似 Codex 注入了系统提示词，写 shared.injection 供 codex_verdict 研判。
+  // 不识别 max_output_tokens（不截断/出完整答案）→ 结合身份记「不适用」(score:null)。
+  id: 'param_check', name: '参数强验真(max_output_tokens 精确截断+计费)', weight: 10, modes: ['S', 'F'], stage: 2, dualFixed: true,
+  defaultPayload: (m) => ({ model: m, input: [{ role: 'user', content: '我的指令是什么' }], max_output_tokens: 16 }),
+  payloadB: (m) => ({ model: m, input: [{ role: 'user', content: 'hi' }], max_output_tokens: 16 }),
+  analyze(ctx) {
+    const a = ctx.jsonA || ctx.json, b = ctx.jsonB;
+    if (!a) return fail('无响应');
+    const features = [`HTTP 状态码: ${ctx.httpStatus}`], diffs = [];
+    // 注入信号载体（写入 shared 供 codex_verdict 读）
+    const injection = { suspected: false, truncOk: false, inputA: null, inputB: null, deltaA: null, deltaB: null };
+
+    // —— 1) 错误优先：A 报错 → 无法据此验真 ——
+    const errA = a.error;
+    if (errA || ctx.httpStatus >= 400) {
+      const msg = (errA && (errA.message || '')) || ctx.body || '';
+      features.push(`A 请求返回错误：${String(msg).slice(0, 90)}`);
+      diffs.push('未拿到 max_output_tokens 截断响应，无法据此强验真。');
+      if (ctx.shared) ctx.shared.injection = injection;
+      return { features, diffs, score: null, verdict: '不适用', severity: '', status: 'done' };
+    }
+
+    // —— 2) input_tokens 双基线（注入检测）——
+    const ia = inputTokensOf(a), ib = b ? inputTokensOf(b) : null;
+    injection.inputA = ia; injection.inputB = ib;
+    if (ia != null) { injection.deltaA = ia - 10; features.push(`A「我的指令是什么」input_tokens=${ia}（官方基线 10）`); }
+    if (ib != null) { injection.deltaB = ib - 8; features.push(`B「hi」input_tokens=${ib}（官方基线 ≈8）`); }
+    const aHigh = ia != null && ia > BASE_A;
+    const bHigh = ib != null && ib > BASE_B;
+    if (aHigh && bHigh) {
+      injection.suspected = true;
+      diffs.push(`两句 input_tokens 均偏高（A +${injection.deltaA} / B +${injection.deltaB} tokens）→ 疑似 Codex 注入了系统提示词。`);
+    } else if (aHigh || bHigh) {
+      // 弱信号：单句偏高（可能分词差异/缓存），记特征但 suspected 不置 true，交研判加权
+      features.push(`单句 input_tokens 偏高（A 高:${aHigh} / B 高:${bHigh}）→ 弱注入信号，交综合研判。`);
+    } else if (ia != null) {
+      features.push('input_tokens 与官方基线一致 → 无注入迹象 ✓');
+    }
+
+    // —— 3) max_output_tokens 精确截断 + 计费（以 A 为准强验真）——
+    const trunc = truncatedByMaxTokens(a);
+    const ua = a.usage || {};
+    const outTok = typeof ua.output_tokens === 'number' ? ua.output_tokens : null;
+    const reasonTok = ua.output_tokens_details && ua.output_tokens_details.reasoning_tokens;
+    const noMessage = !Array.isArray(a.output) || !a.output.some((o) => o && o.type === 'message');
+    const outOk = outTok != null && outTok <= 16 + 2; // 截断在 16，留少量容错
+    const reasonOk = typeof reasonTok === 'number' && reasonTok > 0;
+
+    if (trunc && noMessage && outOk) {
+      injection.truncOk = true;
+      features.push(`A 在 max_output_tokens 处精确截断（status=incomplete, reason=max_output_tokens, output_tokens=${outTok}${reasonOk ? `, reasoning_tokens=${reasonTok}` : ''}, 无 message）→ 真实官方截断+计费行为 ✓`);
+      if (ctx.shared) ctx.shared.injection = injection;
+      // 截断验真成立：若同时检出注入 → 仍给高分但提示（最终归类交 codex_verdict）
+      if (injection.suspected) diffs.push('截断+计费已验真，但 input_tokens 偏高 → 疑为 Codex 渠道（详见综合研判）。');
+      return { features, diffs, score: 100, verdict: '真', severity: '', status: 'done' };
+    }
+
+    // —— 4) 未精确截断 → 结合身份记「不适用」——
+    if (ctx.shared) ctx.shared.injection = injection;
+    const ch = ctx.shared && ctx.shared.channel;
+    if (!trunc) {
+      features.push(`未在 max_output_tokens 处截断（status=${a.status}, output_tokens=${outTok}）`);
+      if (ch && ch.code === 'codex') diffs.push('身份已判为 Codex CLI：可能不严格执行 max_output_tokens，本项不构成异常（不计分）。');
+      else diffs.push('上游未精确执行 max_output_tokens：可能网关忽略该参数或存在逆向行为，请自行核实（不报错≠假）。');
+    } else {
+      // 截断了但形态不全（如有 message / output_tokens 异常）
+      features.push(`截断状态命中但计费形态不完整（output_tokens=${outTok}, hasMessage=${!noMessage}）`);
+      diffs.push('截断行为与官方不完全一致，无法据此强验真。');
+    }
+    return { features, diffs, score: null, verdict: '不适用', severity: '', status: 'done' };
+  },
+};
+
+const param_min = {
+  // 下限报错验真（辅助佐证 param_check）：发 max_output_tokens=1。
+  // 官方报「需 >= 16」(integer_below_min_value) → 强验真 100；
+  // 报别的错/不报错 → 不适用(score:null)，结合身份给提示。「不报错≠假」。
+  id: 'param_min', name: '参数下限验真(max_output_tokens=1 报错)', weight: 10, modes: ['S', 'F'], errorProbe: true, stage: 2,
   defaultPayload: (m) => ({ model: m, max_output_tokens: 1, input: [{ role: 'user', content: 'hi' }] }),
   analyze(ctx) {
     const j = ctx.json;
     const err = j && j.error;
     const msg = (err && (err.message || '')) || '';
     const features = [`HTTP 状态码: ${ctx.httpStatus}`], diffs = [];
-    // 官方对 max_output_tokens=1 的标准报错：param=max_output_tokens 且 code=integer_below_min_value，
-    // 或消息明确提到 ">= 16"。
     const matchOfficial = !!err && (
       (err.param === 'max_output_tokens' && err.code === 'integer_below_min_value') ||
-      /max_output_tokens/i.test(msg) && /(>=\s*16|minimum|below minimum|at least 16)/i.test(msg)
+      (/max_output_tokens/i.test(msg) && /(>=\s*16|minimum|below minimum|at least 16)/i.test(msg))
     );
     if (matchOfficial) {
       features.push('官方对 max_output_tokens=1 报「需 >= 16」→ 真实官方上游行为 ✓');
@@ -209,19 +305,17 @@ const param_check = {
     }
     const errored = (ctx.httpStatus >= 400) || !!err;
     if (errored) {
-      // 报了别的错 → 无法据此验真
       features.push(`返回错误但非 max_output_tokens 下限报错：${(msg || ctx.body || '').slice(0, 90)}`);
       diffs.push('未拿到官方「需 >= 16」报错，无法据此验真。');
       return { features, diffs, score: null, verdict: '不适用', severity: '', status: 'done' };
     }
-    // 200 正常返回（没报错）→ 结合身份渠道判断
     const ch = ctx.shared && ctx.shared.channel;
     if (ch && ch.code === 'codex') {
-      features.push('未报错，但身份已判为 Codex CLI 渠道 → Codex CLI 不识别 max_output_tokens 字段，属合理');
+      features.push('未报错，但身份已判为 Codex CLI 渠道 → 不严格校验该字段下限属合理');
       diffs.push('Codex CLI 渠道下本项不构成异常（不计分）。');
     } else {
       features.push(`未报错（HTTP ${ctx.httpStatus}）：未拒绝非法的 max_output_tokens=1`);
-      diffs.push('身份无法判断为 Codex：可能是上游网关忽略了该参数，或存在逆向行为，请自行核实。');
+      diffs.push('可能上游网关忽略了该参数，或存在逆向行为，请自行核实（不报错≠假）。');
     }
     return { features, diffs, score: null, verdict: '不适用', severity: '', status: 'done' };
   },
@@ -294,10 +388,75 @@ const token_billing = {
   },
 };
 
+const codex_verdict = {
+  // 综合研判（信息项，不计入总分）：汇总 channel_id(渠道) + identity(身份, 已 mutate 进 channel) +
+  // param_check(注入信号 injection) → 给出「纯官方直连 / Codex CLI 渠道 / 非官渠道」三态结论。
+  // 研判逻辑：先看官方协议特征(resp_ + 精确截断计费)是否成立；
+  //   不成立 → 非官渠道；成立 → 在「纯官 vs Codex」间靠注入信号(身份自述 codex / input_tokens 偏高)二选一。
+  // 标 info:true → 只给结论卡，不参与评分（避免与 channel_id/param_check 分数重复）。
+  // stage 3 串行执行，此时 shared.channel / shared.injection 已由前序探针写好。
+  id: 'codex_verdict', name: '综合研判（纯官 / Codex / 非官）', weight: 0, modes: ['Q', 'S', 'F'], info: true, stage: 3, passive: true,
+  defaultPayload: (m) => ({ model: m, input: [{ role: 'user', content: 'ping' }], max_output_tokens: 16 }),
+  analyze(ctx) {
+    const ch = (ctx.shared && ctx.shared.channel) || null;
+    const inj = (ctx.shared && ctx.shared.injection) || null;
+    const features = [], diffs = [];
+
+    // 渠道/身份信号
+    const code = ch ? ch.code : 'unknown';
+    const isRespOfficial = code === 'openai' || code === 'codex'; // 二者都是 resp_ 前缀官方协议
+    const identityCodex = code === 'codex';                       // identity 自述 codex 已改 channel.code
+    features.push(`渠道判定: ${ch ? ch.channel : '未知'}（code=${code}）`);
+
+    // 注入/截断信号
+    const truncOk = !!(inj && inj.truncOk);
+    const injSuspected = !!(inj && inj.suspected);
+    if (inj) {
+      features.push(`max_output_tokens 精确截断+计费: ${truncOk ? '成立 ✓' : '未成立'}`);
+      if (inj.inputA != null) features.push(`input_tokens 注入信号: A=${inj.inputA}(Δ${inj.deltaA >= 0 ? '+' : ''}${inj.deltaA}) / B=${inj.inputB != null ? inj.inputB + '(Δ' + (inj.deltaB >= 0 ? '+' : '') + inj.deltaB + ')' : 'N/A'}，suspected=${injSuspected}`);
+    } else {
+      features.push('未取得 param_check 注入/截断信号（可能未跑该探针或处于快测档）');
+    }
+
+    // 官方协议特征是否成立：resp_ 渠道 +（若有 injection）截断验真成立。
+    // 若没跑 param_check（如 Q 档），仅凭渠道判：truncOk 未知时不否定官方特征。
+
+    let conclusion, score, verdict, severity = '';
+    if (!isRespOfficial) {
+      // 非 resp_ 前缀（chatcmpl- / 非官方格式）→ 非官渠道
+      conclusion = '非官渠道（套壳 / 逆向）';
+      diffs.push(`响应 id 非 resp_ 官方 Responses 前缀（${ch ? ch.channel : '未知'}）→ 判为非官方渠道。`);
+      score = 0; verdict = '假'; severity = 'critical';
+    } else if (inj && !truncOk && !identityCodex) {
+      // resp_ 但 max_output_tokens 不被精确执行，且身份未自述 codex → 上游未透传官方行为，偏非官
+      conclusion = '非官渠道（疑网关 / 逆向）';
+      diffs.push('响应 id 像官方 resp_，但 max_output_tokens 未被精确截断+计费 → 上游可能是网关/逆向，未透传官方截断行为，请自行核实。');
+      score = 30; verdict = '存疑';
+    } else if (identityCodex || injSuspected) {
+      // 官方协议特征成立 + 有注入信号（身份自述 codex 或 input_tokens 偏高）→ Codex CLI
+      conclusion = 'Codex CLI 渠道';
+      const why = [];
+      if (identityCodex) why.push('身份自述含 codex');
+      if (injSuspected) why.push(`两句 input_tokens 偏高（A Δ${inj.deltaA} / B Δ${inj.deltaB}）`);
+      features.push(`官方协议特征齐全，但检出提示词注入：${why.join('、')} → Codex CLI（类似 Claude Code，经官方但注入了系统提示词）。`);
+      score = 100; verdict = '真';
+    } else {
+      // 官方协议特征成立 + 无注入信号 → 纯官方直连
+      conclusion = '纯官方直连';
+      features.push('resp_ 官方前缀 + max_output_tokens 精确截断计费 + input_tokens 无注入 + 身份未自述 codex → 判为纯官方直连。');
+      score = 100; verdict = '真';
+    }
+
+    // 把结论放在 features 最前，醒目
+    features.unshift(`🏁 研判结论：${conclusion}`);
+    return { features, diffs, score, verdict, severity, status: 'done', conclusion };
+  },
+};
+
 export const openaiProtocol = {
   id: 'openai', name: 'OpenAI', emoji: '🔵', icon: 'assets/icons/openai.svg', authStyle: 'bearer',
   defaultEndpoint: 'https://api.openai.com/v1/responses',
   defaultModel: 'gpt-5.5', endpointHint: '形如 https://你的中转站/v1/responses',
   betaHeader: '',
-  probes: [channel_id, identity, basic_request, model_consistency, protocol, param_check, function_calling, structured_output, token_billing],
+  probes: [channel_id, identity, basic_request, model_consistency, protocol, param_check, param_min, function_calling, structured_output, token_billing, codex_verdict],
 };

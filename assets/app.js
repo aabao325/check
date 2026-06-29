@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=15';
-import { anthropicProtocol } from './protocols/anthropic.js?v=15';
-import { openaiProtocol } from './protocols/openai.js?v=15';
-import { geminiProtocol } from './protocols/gemini.js?v=15';
+import * as core from './core.js?v=16';
+import { anthropicProtocol } from './protocols/anthropic.js?v=16';
+import { openaiProtocol } from './protocols/openai.js?v=16';
+import { geminiProtocol } from './protocols/gemini.js?v=16';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -40,7 +40,9 @@ const PROBE_DESC = {
   token_billing: 'Token 计费核验：检查 Responses 的 usage（input_tokens/output_tokens/total_tokens）字段完整且自洽，长短 prompt 增量合理。',
   model_consistency: '同一请求多次发送，检查响应 model 名稳定、output_tokens 方差合理（防随机换模型）。',
   model_info: '同一请求多次发送，检查响应 modelVersion 稳定、token 方差合理（防随机换模型）。',
-  param_check: '参数验真：发 max_output_tokens=1。真官方上游会报「需 >= 16」=验真正向信号；若正常返回则结合身份——Codex 渠道不识别该字段属合理，否则可能是网关忽略参数或逆向行为（不报错≠假，记“不适用”）。',
+  param_check: '参数强验真：发两条固定句（“我的指令是什么”官方恒 input_tokens=10 / “hi”）配 max_output_tokens=16。真官方会在思考阶段精确截断（status=incomplete、reason=max_output_tokens、output_tokens≈16 全为 reasoning_tokens）且 input_tokens 精确——非官/逆向难复现；两句 input_tokens 都偏高=疑似 Codex 注入了系统提示词。',
+  param_min: '参数下限验真：发 max_output_tokens=1。真官方上游会报「需 >= 16」(integer_below_min_value)=验真正向信号；正常返回则结合身份——Codex 渠道不识别该字段属合理，否则可能网关忽略/逆向（不报错≠假，记“不适用”）。',
+  codex_verdict: '综合研判（信息项）：汇总渠道(resp_)、身份自述、max_output_tokens 精确截断计费、input_tokens 注入信号，给出「纯官方直连 / Codex CLI 渠道 / 非官渠道」明确结论。',
   thinking_probe: '思考能力 + 参数代际验真：发与模型代匹配的思考参数（3 系 thinkingLevel / 2.5 系 thinkingBudget），看 thoughtsTokenCount>0；对 2.5 系额外发新版参数验证官方会拒绝错代参数。',
   error_shape: '弃用参数验真：发 temperature/top_p（最新 Claude 已弃用）。真官方上游会报「不支持/已弃用」=验真正向信号；不报错≠假（网关可能静默忽略），记“不适用”，需自行与渠道商确认。',
   long_context: '长上下文真实性：植入暗号到约 32k/100k token 大文本，检查是否被截断。',
@@ -415,6 +417,16 @@ async function executeProbe(probe, payload) {
     if (long) rounds.push({ label: '长请求(追加文本)', body: long.raw.body, httpStatus: long.raw.httpStatus, id: long.json?.id });
     return { ...base, httpStatus: short.raw.httpStatus, headers: short.raw.headers, body: short.raw.body, json: short.json, shortJson: short.json, longJson: long?.json, officialInputTokens, rounds };
   }
+  if (probe.dualFixed) {
+    // 双固定句对照：发 A=payload（主句）与 B=probe.payloadB（对照句），两条都是固定输入、
+    // 不追加长文本（区别于 tokenPair）。用于 max_output_tokens 强验真 + input_tokens 双基线注入检测。
+    const a = await send(payload);
+    const payloadB = probe.payloadB ? probe.payloadB($('#model').value.trim()) : payload;
+    const b = state.mode === 'Q' ? null : await send(payloadB);
+    const rounds = [{ label: 'A·主句', body: a.raw.body, httpStatus: a.raw.httpStatus, id: a.json?.id }];
+    if (b) rounds.push({ label: 'B·对照句', body: b.raw.body, httpStatus: b.raw.httpStatus, id: b.json?.id });
+    return { ...base, httpStatus: a.raw.httpStatus, headers: a.raw.headers, body: a.raw.body, json: a.json, jsonA: a.json, jsonB: b?.json, rounds };
+  }
   if (probe.dualStream) {
     const ns = await send(payload);
     const streamPayload = { ...payload, stream: true };
@@ -432,9 +444,10 @@ async function executeProbe(probe, payload) {
 }
 
 function sharedCtx() {
-  // 跨探针共享：渠道判定等
+  // 跨探针共享：渠道判定、注入信号等。stage 串行保证后序探针读到前序写入。
   const ch = state.results.channel_id?.result?._ctx?.shared?.channel;
-  return { channel: ch || null };
+  const inj = state.results.param_check?.result?._ctx?.shared?.injection;
+  return { channel: ch || null, injection: inj || null };
 }
 
 function appendLongText(payload) {

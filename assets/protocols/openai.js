@@ -6,7 +6,13 @@
  * 探针顺序：渠道识别(0)→身份识别(1)→…→参数检测(2)，身份判定的渠道（如 Codex CLI）
  * 写入 ctx.shared.channel 供 param_check 读取。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=19';
+import { coefficientOfVariation } from '../core.js?v=25';
+import { scanAzureContentFilter, scanResponseHeaders, decideConclusion } from './openai_signals.js?v=25';
+
+// 回链探测：请求体里图片 URL 的哨兵占位符。后端 trace.php?action=start 会把它替换成
+// 本站公网可达的回链地址——这样「前端构造并展示请求体」的约定不变，真实 URL 由后端注入。
+const TRACE_IMG_PLACEHOLDER = '__TRACE_IMG_URL__';
+function fmtDelta(d) { return d == null ? '?' : (d >= 0 ? '+' : '') + d; }
 
 /* ---------- 小工具 ---------- */
 // 遍历 output 数组取最终文本：找 type==='message' 项里的 output_text；
@@ -121,6 +127,9 @@ const identity = {
 
     const diffs = [];
     let score, severity = '';
+    // 注意：OpenAI 身份探针【故意不设】anthropic.js 那样的「官方 id 守卫」。
+    // Claude 官方渠道容忍偶发竞品幻觉（记不适用），但 OpenAI 自述竞品身份一律按【冒充】判 critical。
+    // 切勿把 Claude 的容忍逻辑复制到此处（御三家中仅 Claude 容忍）。
     if (rivals.length && !hasOpenAI && !hasGpt) {
       diffs.push(`自称竞品身份: ${rivals.join(', ')}，且未提 OpenAI/GPT → 冒充`);
       score = 0; severity = 'critical';
@@ -404,74 +413,141 @@ const token_billing = {
   },
 };
 
+const upstream_trace = {
+  // 末端上游研判（信息项，不计分）：响应头指纹 + 回链探测，双管齐下判「上游到底是谁」。
+  //  · 响应头指纹：扫 openai-* / x-ms-*·apim-*·azureml-* / one-api·new-api 专属头 → 直连对象与透传上游。
+  //  · 回链探测：发视觉请求，图片 URL 指向本站回链端点；中转通常只转发不下图，真正下图的是【最末端
+  //    官方上游】，它来抓图暴露出口 IP/UA → 归类 Azure(微软云)/OpenAI/第三方。出于隐私【不展示 IP，只给归属结论】。
+  // 边界：① 仅能看到真正下图的节点（中转自己下图会变成它）；② 需上游接受 URL 形式图片（Azure 部分部署
+  //       只认 base64 则无命中）；③ 本站须公网可达（本地跑不通）；④ UA/响应头可被中转透传或伪造，故多维交叉。
+  id: 'upstream_trace', name: '末端上游研判（响应头指纹 + 回链探测）', weight: 0, modes: ['S', 'F'], info: true, stage: 2, trace: true,
+  defaultPayload: (m) => ({
+    model: m, max_output_tokens: 300,
+    input: [{ role: 'user', content: [
+      { type: 'input_text', text: 'What number is shown in this image? Reply with just the number.' },
+      { type: 'input_image', image_url: TRACE_IMG_PLACEHOLDER, detail: 'low' },
+    ] }],
+  }),
+  analyze(ctx) {
+    const features = [], diffs = [];
+
+    // —— 1) 响应头指纹（扫 evidence：前序所有探针的响应头）——
+    const evidence = Array.isArray(ctx.evidence) ? ctx.evidence : [];
+    const hdr = scanResponseHeaders(evidence);
+    if (ctx.shared) ctx.shared.headers = hdr;   // 供综合研判复用，避免重复扫
+    features.push(`📋 响应头研判：${hdr.label}（置信度 ${hdr.confidence}）`);
+    hdr.signals.forEach((s) => features.push('· ' + s));
+    const f = hdr.facts || {};
+    const factParts = [];
+    if (f.azureServedModel) factParts.push(`Azure实际模型=${f.azureServedModel}`);
+    if (f.azureRegion) factParts.push(`Azure区域=${f.azureRegion}`);
+    if (f.azureGroup) factParts.push(`路由组=${f.azureGroup}`);
+    if (f.openaiVersion) factParts.push(`openai-version=${f.openaiVersion}`);
+    if (f.openaiProject) factParts.push(`project=${f.openaiProject}`);
+    if (f.openaiProcessingMs) factParts.push(`处理耗时=${f.openaiProcessingMs}ms`);
+    if (factParts.length) features.push('附加事实：' + factParts.join(' | '));
+
+    // —— 2) 回链探测出口归属 ——
+    if (ctx.traceImgUrl) features.push(`🔗 回链图片 URL：${ctx.traceImgUrl}`);
+    let upstream = { kind: 'none', uaSawOpenAI: false, uaSawAzure: false };
+    if (ctx.traceError) {
+      diffs.push('回链探测未能发起：' + ctx.traceError + '（需后端 trace.php 且本站公网可达）');
+      upstream = { kind: 'error', uaSawOpenAI: false, uaSawAzure: false };
+    } else {
+      const hits = Array.isArray(ctx.traceHits) ? ctx.traceHits : [];
+      if (!hits.length) {
+        features.push('🔗 回链：无节点下图（上游只认 base64 不 fetch URL / 本站非公网可达 / 该渠道无视觉能力）');
+      } else {
+        // 取首个可识别的公网节点为主判定；展示真实出口 IP + 来源头（你自测工具，IP 是核心信息）。
+        let primary = null;
+        for (const h of hits) {
+          const place = [h.city, h.region, h.country].filter(Boolean).join(', ');
+          features.push(`🔗 下图节点：${h.ip || '?'}${h.ipSource ? '（来源 ' + h.ipSource + '）' : ''} · ${h.label || h.org || '未知归属'}${h.as ? '（' + h.as + '）' : ''}${place ? ' · ' + place : ''}${h.uaKind ? ' · 出口UA自报' + h.uaKind : ''}`);
+          if (h.ua) features.push(`　└ 出口 UA：${h.ua}`);
+          if (h.uaKind === 'openai') upstream.uaSawOpenAI = true;
+          if (h.uaKind === 'azure') upstream.uaSawAzure = true;
+          if (!primary && h.kind && h.kind !== 'unknown') primary = h;
+        }
+        primary = primary || hits[0];
+        upstream.kind = primary.kind || 'other';
+        upstream.org = primary.org || '';
+        upstream.label = primary.label || '';
+      }
+    }
+    if (ctx.shared) ctx.shared.upstream = upstream;
+
+    // —— 3) 本项结论（信息项，最终归属以综合研判为准）——
+    const concl = decideConclusion({
+      channelCode: (ctx.shared && ctx.shared.channel && ctx.shared.channel.code) || 'unknown',
+      truncOk: ctx.shared && ctx.shared.injection ? !!ctx.shared.injection.truncOk : null,
+      azure: scanAzureContentFilter(evidence), headers: hdr, upstream,
+    });
+    features.unshift(`🌐 末端上游：${concl.conclusion}`);
+    const score = concl.verdict === '真' ? 100 : (concl.verdict === '存疑' ? 50 : null);
+    return { features, diffs, score, verdict: concl.verdict === '假' ? '存疑' : concl.verdict, severity: '', status: 'done' };
+  },
+};
+
 const codex_verdict = {
-  // 综合研判（信息项，不计入总分）：汇总 channel_id(渠道) + identity(身份, 已 mutate 进 channel) +
-  // param_check(注入信号 injection) → 给出「纯官方直连 / Codex CLI 渠道 / 非官渠道」三态结论。
-  // 研判逻辑：先看官方协议特征(resp_ + 精确截断计费)是否成立；
-  //   不成立 → 非官渠道；成立 → 在「纯官 vs Codex」间靠注入信号(身份自述 codex / input_tokens 偏高)二选一。
-  // 标 info:true → 只给结论卡，不参与评分（避免与 channel_id/param_check 分数重复）。
-  // stage 3 串行执行，此时 shared.channel / shared.injection 已由前序探针写好。
-  id: 'codex_verdict', name: '综合研判（纯官 / Codex / 非官）', weight: 0, modes: ['Q', 'S', 'F'], info: true, stage: 3, passive: true,
-  defaultPayload: (m) => ({ model: m, input: [{ role: 'user', content: 'ping' }], max_output_tokens: 16 }),
+  // 综合研判（信息项，不计入总分）：【零请求】纯本地合成——复用前序各探针已有的判定结果与响应体，
+  // 不再单独发请求（synthesize:true，app.js executeProbe 跳过网络调用并注入 ctx.evidence）。
+  // 汇总各路信号 → 上游归属结论。判定逻辑全部抽到 openai_signals.decideConclusion（纯函数、可单测）。
+  //   ① channel_id+identity 的渠道码（resp_/chatcmpl-/codex）；
+  //   ② param_check 的注入/截断信号 injection；
+  //   ③ 响应头指纹 headers（优先复用 upstream_trace 扫好的 shared.headers）；
+  //   ④ evidence 响应体的 Azure 审核签名；⑤ upstream_trace 回链出口归属 + 出口 UA。
+  // 原则：无响应头指纹/无回链出口证据时，不武断下「纯官/Azure」定论，只给存疑并讲清原因。stage 3 串行。
+  id: 'codex_verdict', name: '综合研判（上游归属）', weight: 0, modes: ['Q', 'S', 'F'], info: true, stage: 3, synthesize: true,
   analyze(ctx) {
     const ch = (ctx.shared && ctx.shared.channel) || null;
     const inj = (ctx.shared && ctx.shared.injection) || null;
+    const upstream = (ctx.shared && ctx.shared.upstream) || null;
+    const evidence = Array.isArray(ctx.evidence) ? ctx.evidence : [];
+    const azure = scanAzureContentFilter(evidence);
+    // 复用 upstream_trace 扫好的响应头指纹；若未跑（Q 档无 upstream_trace）则就地扫一次。
+    const headers = (ctx.shared && ctx.shared.headers) || scanResponseHeaders(evidence);
     const features = [], diffs = [];
 
-    // 渠道/身份信号
     const code = ch ? ch.code : 'unknown';
-    const isRespOfficial = code === 'openai' || code === 'codex'; // 二者都是 resp_ 前缀官方协议
-    const identityCodex = code === 'codex';                       // identity 自述 codex 已改 channel.code
-    features.push(`渠道判定: ${ch ? ch.channel : '未知'}（code=${code}）`);
-
-    // 注入/截断信号
-    const truncOk = !!(inj && inj.truncOk);
+    const identityCodex = code === 'codex';
+    const truncOk = inj ? !!inj.truncOk : null;
     const injSuspected = !!(inj && inj.suspected);
-    if (inj) {
-      features.push(`max_output_tokens 精确截断+计费: ${truncOk ? '成立 ✓' : '未成立'}`);
-      if (inj.inputA != null) features.push(`input_tokens 注入信号: A=${inj.inputA}(Δ${inj.deltaA >= 0 ? '+' : ''}${inj.deltaA}) / B=${inj.inputB != null ? inj.inputB + '(Δ' + (inj.deltaB >= 0 ? '+' : '') + inj.deltaB + ')' : 'N/A'}，suspected=${injSuspected}`);
+
+    // —— 证据来源清单：每条依据标注【来自哪个探针/哪个信号】，可追溯 ——
+    features.push('—— 证据来源 ——');
+    // ① 渠道（来自 channel_id / identity）
+    features.push(`【渠道识别·channel_id/identity】响应 id 前缀判定：${ch ? ch.channel : '未知'}（code=${code}）`);
+    // ② 参数行为（来自 param_check）
+    if (inj && inj.inputA != null) {
+      features.push(`【参数强验真·param_check】max_output_tokens 截断${truncOk ? '精确成立 ✓' : '未成立'}；input_tokens A=${inj.inputA}(Δ${fmtDelta(inj.deltaA)}) / B=${inj.inputB != null ? inj.inputB + '(Δ' + fmtDelta(inj.deltaB) + ')' : 'N/A'}${injSuspected ? '，两句偏高=疑注入' : ''}`);
     } else {
-      features.push('未取得 param_check 注入/截断信号（可能未跑该探针或处于快测档）');
+      features.push('【参数强验真·param_check】未取得（快测档或未跑）');
+    }
+    // ③ 响应头指纹（来自 upstream_trace 扫描的响应头）
+    features.push(`【响应头指纹·upstream_trace】${headers.label}（置信度 ${headers.confidence}）`);
+    if (headers.openai.length) features.push(`　└ OpenAI 官方头：${headers.openai.join('；')}`);
+    if (headers.azure.length) features.push(`　└ Azure 专属头：${headers.azure.join('；')}`);
+    if (headers.relaySoftware) features.push(`　└ 中转软件特征：${headers.relaySoftware}`);
+    // ④ 响应体审核签名（来自 evidence 深扫）
+    if (azure.detected) { azure.signals.forEach((s) => features.push(`【响应体审核签名·evidence】${s}`)); }
+    else features.push('【响应体审核签名·evidence】未见 Azure 内容过滤字段');
+    // ⑤ 回链出口（来自 upstream_trace 回链）
+    if (upstream && upstream.kind && !['none', 'error'].includes(upstream.kind)) {
+      features.push(`【回链出口·upstream_trace】归属 ${upstream.label || upstream.org || upstream.kind}${upstream.uaSawOpenAI ? '；出口UA自报OpenAI' : ''}${upstream.uaSawAzure ? '；出口UA自报Azure' : ''}`);
+    } else if (upstream && upstream.kind === 'none') {
+      features.push('【回链出口·upstream_trace】已发起但无节点下图（未捕获）');
+    } else if (upstream && upstream.kind === 'error') {
+      features.push('【回链出口·upstream_trace】未能发起（后端不可用/未部署）');
+    } else {
+      features.push('【回链出口·upstream_trace】未跑（快测档或未勾选）');
     }
 
-    // 官方协议特征是否成立：resp_ 渠道 +（若有 injection）截断验真成立。
-    // 若没跑 param_check（如 Q 档），仅凭渠道判：truncOk 未知时不否定官方特征。
-
-    let conclusion, score, verdict, severity = '';
-    if (!isRespOfficial) {
-      // 非 resp_ 前缀（chatcmpl- / 非官方格式）→ 非官渠道
-      conclusion = '非官渠道（套壳 / 逆向）';
-      diffs.push(`响应 id 非 resp_ 官方 Responses 前缀（${ch ? ch.channel : '未知'}）→ 判为非官方渠道。`);
-      score = 0; verdict = '假'; severity = 'critical';
-    } else if (inj && !truncOk && !identityCodex) {
-      // resp_ 但 max_output_tokens 不被精确执行，且身份未自述 codex → 上游未透传官方行为，偏非官
-      conclusion = '非官渠道（疑网关 / 逆向）';
-      diffs.push('响应 id 像官方 resp_，但 max_output_tokens 未被精确截断+计费 → 上游可能是网关/逆向，未透传官方截断行为，请自行核实。');
-      score = 30; verdict = '存疑';
-    } else if (identityCodex) {
-      // 官方协议特征成立 + 身份自述 codex（强证据）→ 确认 Codex CLI 渠道
-      conclusion = 'Codex CLI 渠道';
-      const why = ['身份自述含 codex'];
-      if (injSuspected) why.push(`且两句 input_tokens 偏高（A Δ${inj.deltaA} / B Δ${inj.deltaB}）佐证`);
-      features.push(`官方协议特征齐全 + ${why.join('，')} → 确认 Codex CLI（类似 Claude Code，经官方但注入了系统提示词）。`);
-      score = 100; verdict = '真';
-    } else if (injSuspected) {
-      // 官方协议特征成立，但仅 input_tokens 偏高、身份问不出 codex：
-      // 只能证明「有人往请求里注入了提示词」，无法锚定就是 Codex（也可能是别的 CLI/网关）。
-      // 故降级为中性表述，判存疑，提示用户自行核实，不斩钉截铁说 Codex。
-      conclusion = '官方上游·疑提示词注入（待核实）';
-      diffs.push(`响应是官方 resp_ 且 max_output_tokens 行为正常，但两句 input_tokens 明显偏高（A Δ${inj.deltaA} / B Δ${inj.deltaB}）→ 上游被注入了系统提示词。可能是 Codex CLI、其它 CLI 工具或中转网关所为；因身份未自述 codex，无法确认具体来源，请自行核实。`);
-      score = 60; verdict = '存疑';
-    } else {
-      // 官方协议特征成立 + 无注入信号 → 纯官方直连
-      conclusion = '纯官方直连';
-      features.push('resp_ 官方前缀 + max_output_tokens 精确截断计费 + input_tokens 无注入 + 身份未自述 codex → 判为纯官方直连。');
-      score = 100; verdict = '真';
-    }
-
-    // 把结论放在 features 最前，醒目
-    features.unshift(`🏁 研判结论：${conclusion}`);
-    return { features, diffs, score, verdict, severity, status: 'done', conclusion };
+    // —— 结论 + 推理依据（decideConclusion 的每条 reason 已含来源描述）——
+    const dec = decideConclusion({ channelCode: code, truncOk, injSuspected, identityCodex, azure, headers, upstream });
+    features.push('—— 研判推理 ——');
+    dec.reasons.forEach((r) => { if (dec.verdict === '真') features.push('• ' + r); else diffs.push('• ' + r); });
+    features.unshift(`🏁 研判结论：${dec.conclusion}`);
+    return { features, diffs, score: dec.score, verdict: dec.verdict, severity: dec.severity, status: 'done', conclusion: dec.conclusion };
   },
 };
 
@@ -480,5 +556,5 @@ export const openaiProtocol = {
   defaultEndpoint: 'https://api.openai.com/v1/responses',
   defaultModel: 'gpt-5.5', endpointHint: '形如 https://你的中转站/v1/responses',
   betaHeader: '',
-  probes: [channel_id, identity, basic_request, model_consistency, protocol, param_check, param_min, function_calling, structured_output, token_billing, codex_verdict],
+  probes: [channel_id, identity, basic_request, model_consistency, protocol, param_check, param_min, function_calling, structured_output, token_billing, upstream_trace, codex_verdict],
 };

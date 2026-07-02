@@ -2,7 +2,7 @@
  * report.js —— 分享报告查看页（只读）
  * 支持两种来源：?id=xxx（后端短链）/ #data=base64（静态分享）
  * ===================================================================== */
-import * as core from './core.js?v=19';
+import * as core from './core.js?v=25';
 
 const $ = (s) => document.querySelector(s);
 
@@ -236,11 +236,15 @@ function buildIoBlock(io) {
 
 function channelCode(ch) {
   if (!ch) return 'unknown';
+  if (ch.includes('Azure')) return 'azure';
+  if (ch.includes('中转软件') || ch.includes('中转')) return 'relay';
+  if (ch.includes('Codex')) return 'claudecode';
   if (ch.includes('Claude Code')) return 'claudecode';
   if (ch.includes('Anthropic')) return 'anthropic';
   if (ch.includes('Bedrock')) return 'bedrock';
   if (ch.includes('Vertex')) return 'vertex';
-  if (ch.includes('套壳') || ch.includes('非官方')) return 'foreign';
+  if (ch.includes('OpenAI') || ch.includes('官方')) return 'openai';
+  if (ch.includes('套壳') || ch.includes('非官方') || ch.includes('逆向')) return 'foreign';
   return 'unknown';
 }
 

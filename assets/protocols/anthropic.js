@@ -12,7 +12,7 @@
  *
  * 思路全部吸收自 veridrop 的 anthropic detectors（权重、阈值对齐）。
  * ===================================================================== */
-import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=19';
+import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=25';
 
 // 多模态魔法串（PDF 探针）。
 const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
@@ -21,6 +21,78 @@ const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
 const RIVAL_WORDS = ['gpt-3', 'gpt-4', 'gpt-5', 'openai', 'chatgpt', 'gemini', 'bard',
   'deepseek', 'qwen', '通义', 'tongyi', '文心', 'wenxin', '豆包', 'doubao', 'llama', 'mistral', 'grok'];
 const BRAND_FINGERPRINTS = ['amazon q', 'aws bedrock', 'bedrock', 'vertex ai', 'google cloud'];
+
+/* =====================================================================
+ * 「伪装为 Claude Code 官方客户端」——针对部分中转网关（如 sub2api）设置的
+ * 「仅允许 Claude Code 客户端」分组限制。这类网关的判定完全在应用层（非 TLS
+ * 指纹）：User-Agent 匹配 claude-cli/x.x.x + system 里出现官方提示词或计费
+ * 归因块 + X-App/anthropic-beta/anthropic-version 非空 + metadata.user_id
+ * 符合固定格式。此处只构造能通过这类判定的最简特征，不冒充完整官方系统提示词
+ * 全文（那样会污染「身份识别」等探针的语义判断）。UA / 计费块文本均可在页面
+ * 「高级设置」里自定义，此处只是预填的默认值。
+ * 仅适用于你自己可控的网关/账号自测，不要用来绕过无权限访问的第三方限制。
+ * ===================================================================== */
+
+const MIMIC_CLI_VERSION = '2.1.161';
+export const MIMIC_DEFAULT_UA = `claude-cli/${MIMIC_CLI_VERSION} (external, cli)`;
+export const MIMIC_DEFAULT_BILLING_TEXT = `x-anthropic-billing-header: cc_version=${MIMIC_CLI_VERSION}.mim; cc_entrypoint=cli;`;
+
+/** 按用户自定义（或默认）UA 拼装要附加的请求头。 */
+export function mimicHeaders(ua) {
+  return { 'User-Agent': (ua || MIMIC_DEFAULT_UA).trim() || MIMIC_DEFAULT_UA, 'X-App': 'cli' };
+}
+
+/* uuid4：优先用浏览器原生 API，不可用时用 getRandomValues 手拼（不假设一定支持 randomUUID）。 */
+function uuid4() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const hex = [...b].map((x) => x.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
+}
+function randHex(len) {
+  const b = new Uint8Array(Math.ceil(len / 2));
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(b);
+  else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('').slice(0, len);
+}
+
+// 同一次页面会话内固定的设备号/会话号（模拟同一 CLI 会话稳定不变，而非每个探针请求都换身份）。
+const MIMIC_DEVICE_ID = randHex(64);
+const MIMIC_SESSION_ID = uuid4();
+
+/** 计费块文本特征识别：判断某段文本是不是我们自己注入的这类块（供 system_prompt_leak 探针复用）。
+ * 按固定前缀 + cc_entrypoint= 子串匹配，即便用户自定义了版本号后缀也能识别。 */
+export function isBillingBlockText(t) {
+  return typeof t === 'string' && t.startsWith('x-anthropic-billing-header') && t.includes('cc_entrypoint=');
+}
+
+/**
+ * 把请求体伪装成 Claude Code 官方客户端流量：
+ *  - system 头部插入计费归因块（兼容 system 原本是 undefined / 字符串 / 数组）
+ *  - metadata.user_id 填合法格式（legacy: user_{64hex}_account__session_{uuid}）
+ * 深拷贝输入，不修改调用方原对象（用户在请求体框里手改的内容保持不变，只在实际发出时套一层）。
+ * @param {object} payload
+ * @param {string} [billingText]  自定义计费归因块文本，缺省用 MIMIC_DEFAULT_BILLING_TEXT。
+ */
+export function mimicClaudeCodePayload(payload, billingText) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const p = JSON.parse(JSON.stringify(payload));
+  const text = (billingText || '').trim() || MIMIC_DEFAULT_BILLING_TEXT;
+  const billingBlock = { type: 'text', text };
+  if (Array.isArray(p.system)) {
+    p.system = [billingBlock, ...p.system];
+  } else if (typeof p.system === 'string' && p.system) {
+    p.system = [billingBlock, { type: 'text', text: p.system }];
+  } else {
+    p.system = [billingBlock];
+  }
+  p.metadata = { ...(p.metadata || {}), user_id: `user_${MIMIC_DEVICE_ID}_account__session_${MIMIC_SESSION_ID}` };
+  return p;
+}
 
 /* ---------- 小工具 ---------- */
 function textOf(json) {
@@ -93,6 +165,16 @@ const identity = {
 
     const diffs = [];
     let score, severity = '';
+    // 官方 id 守卫：响应 id 前缀已坐实官方渠道（Anthropic 直连 / Bedrock / Vertex，前缀难伪造）时，
+    // 身份自述无法再证伪——真 Claude 也会偶发自称竞品（GPT/Gemini 等身份幻觉），属正常现象，不应判套壳。
+    // 故「官方 id + 回复自述竞品身份(且未自认 Claude/Anthropic)」记「不适用」，不计入总分、也不扣分。
+    const ch = ctx.shared && ctx.shared.channel;
+    const officialId = !!(ch && (ch.code === 'anthropic' || ch.code === 'bedrock' || ch.code === 'vertex'));
+    if (officialId && (brands.length || rivals.length) && !hasClaude && !hasAnthropic) {
+      features.push(`官方渠道(${ch.channel}) + 竞品自述：判为官方模型身份幻觉，不计入总分`);
+      diffs.push(`响应 id 前缀已坐实官方渠道(${ch.channel})，回复却自述竞品/外部身份(${[...brands, ...rivals].join(', ')}) → 官方模型偶发身份幻觉，非套壳冒充，记不适用`);
+      return { features, diffs, score: null, verdict: '不适用', severity: '', status: 'done' };
+    }
     if (brands.length) {
       diffs.push(`自述含具体竞品后端品牌: ${brands.join(', ')} → 高度疑似冒充`);
       score = 0; severity = 'critical';
@@ -311,6 +393,9 @@ const json_schema = {
     },
   }),
   analyze(ctx) {
+    if (isAnthropicError(ctx.json)) {
+      return { features: [`报错: ${(ctx.json.error.message || '').slice(0, 120)}`], diffs: ['该渠道/模型可能不支持 output_config.format 参数，无法据此判断结构化输出能力，记不适用。'], score: null, verdict: '不适用', severity: '', status: 'done' };
+    }
     const text = textOf(ctx.json).trim();
     if (!text) return fail('无文本输出');
     const features = [], diffs = [];
@@ -333,19 +418,26 @@ const json_schema = {
 };
 
 const tool_schema_stream = {
+  // 注意：本探针只测「工具调用 + 复杂 Schema + 流式」三件事，故意不带 thinking/output_config.effort——
+  // 混入思考参数曾在部分模型/版本上报「不支持该 effort 档位」而把本探针误杀成假；思考链验证已由
+  // 专门的 thinking_signature 探针覆盖，无需在此重复测。
   id: 'tool_schema_stream', name: '工具调用+复杂Schema+SSE', weight: 10, modes: ['S', 'F'], stream: true,
   defaultPayload: (m) => ({
     model: m, max_tokens: 10000, stream: true,
-    thinking: { type: 'adaptive' }, output_config: { effort: 'xhigh' },
     tools: [{
       name: 'generate_schema', description: '生成一个复杂的 JSON Schema 对象用于结构化输出校验',
       input_schema: { type: 'object', properties: { schema: { type: 'object', description: '完整的 JSON Schema 对象' }, description: { type: 'string' } }, required: ['schema', 'description'] },
     }],
+    // 强制调用该工具（而非仅靠提示词诱导），避免模型选择直接用文本回答导致误判"工具能力被剥离"。
+    tool_choice: { type: 'tool', name: 'generate_schema' },
     messages: [{ role: 'user', content: '请用 generate_schema 工具，为一个「崩溃根因分析报告」生成完整的 JSON Schema，包含 findings/summary/go_no_go/fail_count 等字段，每个字段都要有 description 和 additionalProperties:false。' }],
   }),
   analyze(ctx) {
     // 流式：ctx.body 是 SSE 文本
     const features = [], diffs = [];
+    if (isAnthropicError(ctx.json)) {
+      return { features: [`报错: ${(ctx.json.error.message || '').slice(0, 120)}`], diffs: ['请求被拒，可能是参数不兼容（非工具/Schema/流式能力本身的问题），无法据此判断，记不适用。'], score: null, verdict: '不适用', severity: '', status: 'done' };
+    }
     if (!ctx.body || !/data:/.test(ctx.body)) {
       // 不是 SSE：可能中转站不透传流式
       if (ctx.json) { diffs.push('请求了 stream:true 但返回整包 JSON → 流式未透传'); }
@@ -357,18 +449,15 @@ const tool_schema_stream = {
     const hasStart = eventTypes.includes('message_start');
     const hasStop = eventTypes.includes('message_stop');
     const tus = message ? message.content.filter((c) => c.type === 'tool_use') : [];
-    const thinks = message ? message.content.filter((c) => c.type === 'thinking') : [];
-    if (hasStart && hasStop) { score += 30; features.push('SSE 序列完整(message_start…message_stop) ✓'); }
+    if (hasStart && hasStop) { score += 35; features.push('SSE 序列完整(message_start…message_stop) ✓'); }
     else diffs.push('SSE 序列不完整');
     if (tus.length) {
-      score += 40;
+      score += 45;
       const tu = tus[0];
       features.push(`生成 tool_use: ${tu.name}`);
       if (tu.input && tu.input.schema && typeof tu.input.schema === 'object') { score += 20; features.push('tool_use.input 含合法 schema 对象 ✓'); }
       else diffs.push('tool_use.input.schema 缺失或残缺');
     } else diffs.push('未生成 tool_use 块');
-    if (thinks.length && thinks[0].signature) { score += 10; features.push('思考块带 signature ✓'); }
-    else if (thinks.length) diffs.push('思考块无 signature');
     score = Math.min(score, 100);
     return { features, diffs, score, verdict: score >= 70 ? '真' : '假', severity: '', status: 'done' };
   },
@@ -402,8 +491,10 @@ const reasoning_iq = {
   // 每题答案唯一、用锚定正则判定；陷阱题(★)专门区分"真旗舰"与"便宜小模型蒙混"。
   // 题库由站点维护、写死在代码里，不允许用户自行添加（欢迎 GitHub issue 反馈题目建议）。
   questions: [
-    { n: 1, q: '用辗转相除法求 4181 和 2584 的最大公约数。', a: '1',
-      ok: (t) => /(?:^|[^\d])1(?![\d])/.test(t) && !/\b(?:11|17|2584|4181|1597)\b/.test(t) },
+    // 注：题面故意不点名"辗转相除法"——点名会诱导模型展示演算步骤，而步骤里会带出
+    // 2584/4181/1597 等原始数字/中间余数，若还拿这些数字当"错误答案"拉黑会把答对的也误判成错。
+    { n: 1, q: '4181 和 2584 的最大公约数是多少？', a: '1',
+      ok: (t) => /(?:^|[^\d])1(?![\d])/.test(t) && !/\b(?:11|17)\b/.test(t) },
     { n: 2, q: '数列 1, 1, 2, 3, 5, 8, 13, ? 的下一项是多少？', a: '21',
       ok: (t) => /(?:^|[^\d])21(?![\d])|二十一/.test(t) },
     { n: 3, q: '数列 2, 6, 12, 20, 30, ? 的下一项是多少？', a: '42',
@@ -430,8 +521,10 @@ const reasoning_iq = {
   defaultPayload(m) {
     const list = this.questions.map((it) => `${it.n}. ${it.q}`).join('\n');
     return {
-      model: m, max_tokens: 1024,
-      system: '你在做一组测试题。请只输出每道题的最终答案，每题一行、以题号前缀（如「1. ...」），不要写解题过程、不要解释、不要带单位。',
+      // max_tokens 调大：12 题若模型不完全遵守"不写过程"（尤其推理/思考型模型），
+      // 1024 容易在后几题被截断，导致明明答对却因为看不到答案段而误判成错。
+      model: m, max_tokens: 4096,
+      system: '你在做一组"是否严格遵守指令"的格式测试。请只输出每道题的最终答案，每题独占一行、以"题号. 答案"格式给出（如「1. 42」）；不要写解题过程、不要解释、不要带单位、不要输出除答案外的任何文字。',
       messages: [{ role: 'user', content: '请依次回答下列各题：\n' + list }],
     };
   },
@@ -445,9 +538,16 @@ const reasoning_iq = {
     let trapFail = 0, trapTotal = 0;
     for (const it of this.questions) {
       if (it.trap) trapTotal++;
-      // 取该题号那一段（到下一题号或换行前）判定；定位失败则退化为全文判定
-      const line = lineFor(t, it.n) || t;
-      if (it.ok(line)) { correct++; }
+      // 取该题号那一段（到下一题号或换行前）判定；定位失败则退化为全文判定。
+      const seg = lineFor(t, it.n) || t;
+      // 部分模型（尤其推理型）不遵守"不写过程"的要求，会在段内先给结论再写解释/演算过程，
+      // 过程或解释文字里常带干扰数字/反义词（如解释"为什么不是三月"时提到"三月"），
+      // 直接拿整段判会被这些文字带偏而误判成错。依次尝试三种粒度，任一命中即算对：
+      // ① 段落首行（模型通常把最终答案放在第一行）② 结论引导词之后的尾巴 ③ 整段兜底。
+      const head = seg.split('\n')[0].trim();
+      const conclusion = tailAfterConclusionMarker(seg);
+      const hit = (head && it.ok(head)) || (conclusion && it.ok(conclusion)) || it.ok(seg);
+      if (hit) { correct++; }
       else { diffs.push(`第${it.n}题错误（正确答案：${it.a}）${it.trap ? ' ★高区分题' : ''}`); if (it.trap) trapFail++; }
     }
     const score = Math.round((correct / total) * 100);
@@ -481,6 +581,17 @@ function buildAnswerMap(text) {
     if (map[marks[i].n] === undefined) map[marks[i].n] = seg; // 同题号只取首次
   }
   return map;
+}
+
+// 取一段文本里"结论引导词"之后的尾巴（模型写了推理过程时，真正的结论通常在最后一句）。
+// 找不到引导词则返回 ''，调用方应退化为整段判定。
+const CONCLUSION_MARKERS = /(?:所以|因此|故|综上|最终|答案是|答案为|答案：|答案:|结论是|结论：|结论:)/g;
+function tailAfterConclusionMarker(seg) {
+  if (!seg) return '';
+  let last = -1, m;
+  CONCLUSION_MARKERS.lastIndex = 0;
+  while ((m = CONCLUSION_MARKERS.exec(seg)) !== null) last = m.index + m[0].length;
+  return last >= 0 ? seg.slice(last).trim() : '';
 }
 
 const knowledge = {
@@ -526,6 +637,9 @@ const web_search = {
   id: 'web_search', name: '联网搜索能力', weight: 8, modes: ['S', 'F'], info: true,
   defaultPayload: (m) => ({
     model: m, max_tokens: 1024,
+    // 注意：web_search 是服务端工具(server tool)，官方 tool_choice 只保证对客户端工具(client tool)生效，
+    // 对 web_search/code_execution 这类服务端工具强制 tool_choice 不受官方保证支持，故此处不加，
+    // 靠 messages 里的提示词诱导调用；模型不适用/不支持时已在 analyze 里按"不适用"处理，不算误判。
     tools: [{ type: 'web_search_20250305', name: 'web_search' }],
     messages: [{ role: 'user', content: '请联网搜索并告诉我今天有什么重要新闻？' }],
   }),
@@ -571,7 +685,10 @@ const vision_pdf = {
     const features = [`当前渠道: ${channel.channel}`];
     // 关键修正：区分"渠道不支持 image URL" vs "真不具备多模态"
     const errMsg = (isAnthropicError(j) ? j.error.message : '') || (j?.error?.message) || '';
-    if (/url sources are not supported|data:\s*url|不支持.*url/i.test(errMsg) || /url sources are not supported/i.test(ctx.body || '')) {
+    // 不要求连续短语（供应商措辞会变，如 "URL content sources are not yet supported"）：
+    // 只要同时提到 url 相关字样 + 不支持/未支持类词汇即可判定为「渠道不支持 image URL」。
+    const urlUnsupported = (blob) => /\burl\b/i.test(blob) && /(not\s*(yet\s*)?support|unsupported|不支持|未支持)/i.test(blob) && /source|url|图片|image/i.test(blob);
+    if (urlUnsupported(errMsg) || /data:\s*url/i.test(errMsg) || urlUnsupported(ctx.body || '')) {
       return {
         features: [...features, `渠道返回: "${errMsg.slice(0, 80)}"`],
         diffs: ['该渠道不支持 image URL（Vertex 等常见）。这不代表假，建议改用 PDF/base64 图片复测。'],
@@ -797,6 +914,13 @@ const system_prompt_leak = {
         ctx.shared.channel.code = 'claudecode';
       }
       features.push('泄露内容为 Claude Code 官方系统提示词 → Claude Code 渠道（内置提示词属正常，非恶意注入）');
+      return { features, diffs: [], score: 100, verdict: '真', severity: '', status: 'done' };
+    }
+    // 若「伪装 Claude Code」开关已开启，本站会自己往 system 头部注入计费归因块
+    // （x-anthropic-billing-header...cc_entrypoint=...）。这段自复述文本是我们自己
+    // 加的，不是中转层偷偷篡改，需在下面的可疑注入判定之前排除，避免误判。
+    if (isBillingBlockText(raw.trim())) {
+      features.push('泄露内容为本站「伪装 Claude Code」开关自行注入的计费归因块 → 非中转层篡改，属预期行为');
       return { features, diffs: [], score: 100, verdict: '真', severity: '', status: 'done' };
     }
     const suspicious = /you are\b|you're a|act as|pretend|translate all|respond in|\brole:\s|你是\s*(chatgpt|gpt|一个|名为|助手)|扮演|假装|请始终|请用.{0,8}回复|把.{0,8}翻译|转发(所有|全部)?/.test(t) && !clean;

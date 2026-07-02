@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=19">
+  <link rel="stylesheet" href="assets/app.css?v=25">
 </head>
 <body>
 <div class="wrap">
@@ -109,6 +109,29 @@
           <label>anthropic-beta 头</label>
           <input id="betaHeader" placeholder="context-management-2025-06-27,...">
         </div>
+        <div class="field" id="mimicRow">
+          <div class="switch-row">
+            <label class="switch">
+              <input type="checkbox" id="mimicToggle">
+              <span class="track"><span class="thumb"></span></span>
+            </label>
+            <div class="switch-label">伪装为 Claude Code 官方客户端</div>
+          </div>
+          <div class="switch-hint">
+            针对网关「仅允许 Claude Code 客户端」类限制：自动附加 User-Agent/X-App 请求头 + system 计费归因块 + metadata.user_id。
+            <b>仅适用于你自己可控的网关/账号自测</b>，不要用于绕过无权限访问的第三方限制。
+          </div>
+          <div class="mimic-panel" id="mimicPanel">
+            <div class="field">
+              <label>User-Agent 请求头</label>
+              <input id="mimicUA" placeholder="claude-cli/2.1.161 (external, cli)">
+            </div>
+            <div class="field">
+              <label>system 计费归因块文本</label>
+              <input id="mimicBilling" placeholder="x-anthropic-billing-header: cc_version=2.1.161.xxx; cc_entrypoint=cli;">
+            </div>
+          </div>
+        </div>
         <div class="field" id="probeToggleRow">
           <label>勾选要运行的检测项（按检测深度自动预选，专业用户可微调）</label>
           <div class="probe-toggles" id="probeToggles"></div>
@@ -172,6 +195,9 @@
 
     <div class="faq-q">我的 API Key 安全吗？</div>
     <div class="faq-a">Key 只在你本地浏览器与转发代理之间使用，<b>不写入任何数据库</b>。代理仅做一次性转发以绕过浏览器跨域限制。所有特征判定逻辑都在你本地前端运行、开源可查。</div>
+
+    <div class="faq-q">「伪装为 Claude Code 官方客户端」开关是做什么的？</div>
+    <div class="faq-a">部分中转网关会给分组设置「仅允许 Claude Code 官方客户端」的限制，判定依据是 User-Agent、system 提示词特征、若干 header 是否非空、metadata.user_id 格式等应用层特征（与 TLS 指纹无关）。开启此开关后，Claude 协议的检测请求会自动带上这些特征，从而通过该类限制。<b>仅适用于你自己搭建/管理、可控的网关或账号自测</b>，请勿用于绕过你无权限访问的第三方限制。</div>
   </div>
 
   <!-- ============ 页脚：透明度声明 / 致谢 / 开源（第5c） ============ -->
@@ -203,6 +229,6 @@
   </div>
 </div>
 
-<script src="assets/app.js?v=19" type="module"></script>
+<script src="assets/app.js?v=25" type="module"></script>
 </body>
 </html>

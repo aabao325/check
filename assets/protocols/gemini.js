@@ -7,7 +7,7 @@
  * 思考参数代际：2.5 系用 thinkingBudget、3 系用 thinkingLevel；错代参数对 2.5 会被官方拒绝，
  * 对 3 系则向后兼容静默接受（验不了真）。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=19';
+import { coefficientOfVariation } from '../core.js?v=25';
 
 /* ---------- 小工具 ---------- */
 // 取最终文本：candidates[0].content.parts[].text 拼接；防 SAFETY 拦截时 parts undefined。
@@ -41,7 +41,7 @@ const identity = {
   id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1,
   defaultPayload: () => ({
     contents: [{ parts: [{ text: '请做你的详细身份介绍：你是谁？模型名称与版本？由哪家公司训练和开发？请简洁如实回答。' }] }],
-    generationConfig: { maxOutputTokens: 512 },
+    generationConfig: { maxOutputTokens: 2000 },
   }),
   analyze(ctx) {
     const text = (geminiText(ctx.json) || '').toLowerCase();
@@ -57,6 +57,9 @@ const identity = {
 
     const diffs = [];
     let score, severity = '';
+    // 注意：Gemini 身份探针【故意不设】anthropic.js 那样的「官方 id 守卫」。
+    // Claude 官方渠道容忍偶发竞品幻觉（记不适用），但 Gemini 自述竞品身份一律按【冒充掺假】判 critical。
+    // 切勿把 Claude 的容忍逻辑复制到此处（御三家中仅 Claude 容忍）。
     if (rivals.length && !hasGemini && !hasGoogle) {
       diffs.push(`自称竞品身份: ${rivals.join(', ')}，且未提 Gemini/Google → 冒充掺假`);
       score = 0; severity = 'critical';
@@ -76,7 +79,7 @@ const identity = {
 
 const basic_request = {
   id: 'basic_request', name: '基础可用', weight: 15, modes: ['Q', 'S', 'F'],
-  defaultPayload: () => ({ contents: [{ parts: [{ text: 'Reply with exactly: pong' }] }], generationConfig: { maxOutputTokens: 512 } }),
+  defaultPayload: () => ({ contents: [{ parts: [{ text: 'Reply with exactly: pong' }] }], generationConfig: { maxOutputTokens: 2000 } }),
   analyze(ctx) {
     const j = ctx.json; if (!j) return fail('无响应');
     const text = geminiText(j).toLowerCase();
@@ -90,7 +93,7 @@ const basic_request = {
 
 const model_info = {
   id: 'model_info', name: '模型一致性', weight: 15, modes: ['Q', 'S', 'F'], multi: 3,
-  defaultPayload: () => ({ contents: [{ parts: [{ text: 'In one sentence, explain HTTP status 418.' }] }], generationConfig: { maxOutputTokens: 512 } }),
+  defaultPayload: () => ({ contents: [{ parts: [{ text: 'In one sentence, explain HTTP status 418.' }] }], generationConfig: { maxOutputTokens: 2000 } }),
   analyze(ctx) {
     const runs = ctx.multiJson || (ctx.json ? [ctx.json] : []);
     if (!runs.length) return fail('无响应');
@@ -110,7 +113,7 @@ const model_info = {
 
 const protocol = {
   id: 'protocol', name: '协议规范+污染检测', weight: 15, modes: ['Q', 'S', 'F'], passive: true,
-  defaultPayload: () => ({ contents: [{ parts: [{ text: 'ping' }] }], generationConfig: { maxOutputTokens: 512 } }),
+  defaultPayload: () => ({ contents: [{ parts: [{ text: 'ping' }] }], generationConfig: { maxOutputTokens: 2000 } }),
   analyze(ctx) {
     const j = ctx.json; if (!j) return fail('无响应');
     const features = [], diffs = []; let crit = 0, minor = 0;
@@ -141,7 +144,7 @@ const thinking_probe = {
     // 两代发的都是 thinkingLevel，分析时按 ctx.model 的代际判读不同含义。
     return {
       contents: [{ parts: [{ text: '请一步一步解答：如果 x^2 + 5x + 6 = 0，求 x 的值。' }] }],
-      generationConfig: { maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: 'HIGH', includeThoughts: true } },
+      generationConfig: { maxOutputTokens: 2000, thinkingConfig: { thinkingLevel: 'HIGH', includeThoughts: true } },
     };
   },
   analyze(ctx) {
@@ -198,7 +201,7 @@ const function_calling = {
     contents: [{ parts: [{ text: 'Use get_current_weather for Boston in celsius.' }] }],
     tools: [{ functionDeclarations: [{ name: 'get_current_weather', description: 'Get current weather.', parameters: { type: 'OBJECT', properties: { city: { type: 'STRING' }, unit: { type: 'STRING', enum: ['celsius', 'fahrenheit'] } }, required: ['city', 'unit'] } }] }],
     toolConfig: { functionCallingConfig: { mode: 'ANY' } },
-    generationConfig: { maxOutputTokens: 512 },
+    generationConfig: { maxOutputTokens: 2000 },
   }),
   analyze(ctx) {
     const parts = ctx.json?.candidates?.[0]?.content?.parts;
@@ -219,7 +222,7 @@ const structured_output = {
   defaultPayload: () => ({
     contents: [{ parts: [{ text: 'Return JSON with ok=true and nonce="gemini-detector".' }] }],
     generationConfig: {
-      maxOutputTokens: 512,
+      maxOutputTokens: 2000,
       responseMimeType: 'application/json',
       responseSchema: { type: 'OBJECT', properties: { ok: { type: 'BOOLEAN' }, nonce: { type: 'STRING' } }, required: ['ok', 'nonce'] },
     },
@@ -239,7 +242,7 @@ const structured_output = {
 
 const token_usage = {
   id: 'token_usage', name: 'Token 计费', weight: 10, modes: ['S', 'F'], tokenPair: true,
-  defaultPayload: () => ({ contents: [{ parts: [{ text: 'Reply with exactly: ok' }] }], generationConfig: { maxOutputTokens: 512 } }),
+  defaultPayload: () => ({ contents: [{ parts: [{ text: 'Reply with exactly: ok' }] }], generationConfig: { maxOutputTokens: 2000 } }),
   analyze(ctx) {
     const s = ctx.shortJson || ctx.json, l = ctx.longJson;
     if (!s) return fail('无响应');

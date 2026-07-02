@@ -85,6 +85,38 @@ export async function pingBackend() {
   }
 }
 
+/* ---------- 回链探测（末端上游 IP/ASN/org）：走 trace.php ----------
+ * traceStart：后端生成 sid + 本站公网回链 URL，替换 payload 里的 __TRACE_IMG_URL__ 占位符后
+ *             转发视觉请求到目标；返回 {ok, sid, imgUrl, httpStatus, body}。
+ * traceLogs：拉取该 sid 下「真正来下图的节点」IP 及其 ip-api.com 归属；返回 {ok, hits:[{ip,org,as,...}]}。 */
+export async function traceStart(cfg, payload, extraHeaders = {}) {
+  try {
+    const res = await fetch(`${PROXY.base}/trace.php?action=start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUrl: cfg.targetUrl,
+        apiKey: cfg.apiKey,
+        authStyle: cfg.authStyle || 'bearer',
+        payload,
+        extraHeaders,
+      }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+export async function traceLogs(sid) {
+  try {
+    const res = await fetch(`${PROXY.base}/trace.php?action=logs&id=${encodeURIComponent(sid)}`);
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: String(e), hits: [] };
+  }
+}
+
 /* ---------- SSE 解析：把流式响应文本还原成事件序列 + 最终消息 ---------- */
 /**
  * @param {string} text  原始 SSE 文本（data: {...}\n\n ...）
@@ -229,9 +261,9 @@ export function scoreTotal(results) {
 export function verdictBadge(r) {
   if (r.status === 'skip') return { text: '⏭ 跳过', cls: 'skip' };
   if (r.status === 'error') return { text: '⚠ 出错', cls: 'warn' };
-  if (r.verdict === '真' || r.score >= 70) return { text: `✅ 真 ${r.score}`, cls: 'pass' };
   if (r.verdict === '不适用') return { text: '➖ 不适用', cls: 'na' };
-  if (r.score >= 40) return { text: `⚠ 存疑 ${r.score}`, cls: 'warn' };
+  if (r.verdict === '真' || r.score >= 70) return { text: `✅ 真 ${r.score}`, cls: 'pass' };
+  if (r.verdict === '存疑' || r.score >= 40) return { text: `⚠ 存疑 ${r.score}`, cls: 'warn' };
   return { text: `❌ 假 ${r.score}`, cls: 'fail' };
 }
 

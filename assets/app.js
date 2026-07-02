@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=19';
-import { anthropicProtocol } from './protocols/anthropic.js?v=19';
-import { openaiProtocol } from './protocols/openai.js?v=19';
-import { geminiProtocol } from './protocols/gemini.js?v=19';
+import * as core from './core.js?v=25';
+import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=25';
+import { openaiProtocol } from './protocols/openai.js?v=25';
+import { geminiProtocol } from './protocols/gemini.js?v=25';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -17,7 +17,7 @@ const ISSUE_URL = REPO_URL + '/issues';
 // 每个探针的一句话说明（用于「检测项说明 / FAQ」区，按 id 取；缺省回退到探针 name）
 const PROBE_DESC = {
   channel_id: '看响应 id 前缀判定渠道：Claude msg_01=官方/msg_bdrk_=Bedrock/msg_vrtx_=Vertex；OpenAI resp_=官方 Responses、chatcmpl-=疑似套 Chat 壳。若身份回复中自述 “Claude Code / Codex”，则进一步细分为对应工具渠道。',
-  identity: '问模型「你是谁/详细身份介绍」，核对自述身份是否与官方一致；暴露竞品身份（如 Claude 协议里自称 GPT、Gemini 里自称 OpenAI）=掺假；自述 Codex/Claude Code 则细分工具渠道。',
+  identity: '问模型「你是谁/详细身份介绍」，核对自述身份是否与官方一致；暴露竞品身份（如 Claude 协议里自称 GPT、Gemini 里自称 OpenAI）=掺假；自述 Codex/Claude Code 则细分工具渠道。注：若响应 id 前缀已坐实官方渠道（如 Claude 的 msg_/msg_bdrk_/msg_vrtx_），竞品自述视为官方模型的身份幻觉（真模型也会偶发），记「不适用」而非掺假。',
   thinking_signature: '验证思考链的加密签名（无法伪造，最强证据）：真思考有长签名 + thinking_tokens>0。',
   message_id: '检查 message id 是否符合官方规范格式。',
   protocol: '校验响应结构是否符合官方 schema（Claude usage 含 cache_creation/service_tier；OpenAI Responses 含 output/usage.input_tokens；Gemini 含 candidates/usageMetadata），并扫描套壳污染字段。',
@@ -42,7 +42,8 @@ const PROBE_DESC = {
   model_info: '同一请求多次发送，检查响应 modelVersion 稳定、token 方差合理（防随机换模型）。',
   param_check: '参数强验真：发两条固定句（“我的指令是什么”官方恒 input_tokens=10 / “hi”）配 max_output_tokens=16。真官方会在思考阶段精确截断（status=incomplete、reason=max_output_tokens、output_tokens≈16 全为 reasoning_tokens）且 input_tokens 精确——非官/逆向难复现；两句 input_tokens 都偏高=疑似 Codex 注入了系统提示词。',
   param_min: '参数下限验真：发 max_output_tokens=1。真官方上游会报「需 >= 16」(integer_below_min_value)=验真正向信号；正常返回则结合身份——Codex 渠道不识别该字段属合理，否则可能网关忽略/逆向（不报错≠假，记“不适用”）。',
-  codex_verdict: '综合研判（信息项）：汇总渠道(resp_)、身份自述、max_output_tokens 精确截断计费、input_tokens 注入信号，给出结论。判 Codex CLI 需身份自述含 codex（强证据）；仅 input_tokens 偏高、身份问不出 codex 时只判「官方上游·疑提示词注入（待核实）」，不锚定具体来源。',
+  upstream_trace: '末端上游研判（信息项）：①响应头指纹——扫 openai-* 官方头、x-ms-*/apim-*/azureml-*/azureai-* 等 Azure 专属头；②回链探测——获取出口 IP/UA → 归类 Azure(微软云)/OpenAI/第三方。边界：仅看真正下图的节点；上游需接受 URL 图片(Azure 部分部署只认 base64 则无命中)。',
+  codex_verdict: '综合研判（信息项·零请求）：复用前序探针结果与响应头本地合成上游归属结论。优先级：one-api/new-api 中转软件透传判别 > Azure(x-ms-*/审核签名) > OpenAI(openai-*)。原则：① 无响应头指纹、无回链出口证据时不武断下「纯官/Azure」定论，只给存疑并讲清原因；② 身份自述 codex 可断言 Codex；③ 回源出口 IP=微软云可基本判断为官方。响应头/UA 可被透传或伪造，故多维交叉、存疑必说明。',
   thinking_probe: '思考能力 + 参数代际验真：发与模型代匹配的思考参数（3 系 thinkingLevel / 2.5 系 thinkingBudget），看 thoughtsTokenCount>0；对 2.5 系额外发新版参数验证官方会拒绝错代参数。',
   error_shape: '弃用参数验真：发 temperature/top_p（最新 Claude 已弃用）。真官方上游会报「不支持/已弃用」=验真正向信号；不报错≠假（网关可能静默忽略），记“不适用”，需自行与渠道商确认。',
   long_context: '长上下文真实性：植入暗号到约 32k/100k token 大文本，检查是否被截断。',
@@ -54,6 +55,7 @@ const state = {
   results: {},      // probeId -> result
   brand: null,
   lastSummary: '',
+  mimicClaudeCode: false,   // 「伪装为 Claude Code 官方客户端」开关（仅 Claude 协议生效）
 };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -107,6 +109,9 @@ function selectProtocol(id) {
   $('#model').value = p.defaultModel;
   $('#betaHeader').value = p.betaHeader || '';
   $('#betaRow').style.display = p.betaHeader ? '' : 'none';
+  // 「伪装为 Claude Code 官方客户端」仅对 Claude 协议有意义
+  const mimicRow = $('#mimicRow');
+  if (mimicRow) mimicRow.style.display = id === 'anthropic' ? '' : 'none';
   // 「完整（含长上下文）」档仅 Claude 有意义；OpenAI/Gemini 无此检测，隐藏该档
   const fBtn = $('#modeBtns .mode-btn[data-mode="F"]');
   const allowF = id === 'anthropic';
@@ -174,6 +179,17 @@ function bindControls() {
   });
   // 改模型名后，未手改的请求体模板用新模型重建（手改过的保留），并复位旧结果
   $('#model').addEventListener('change', () => { state.results = {}; renderCards(); });
+  // 「伪装为 Claude Code 官方客户端」开关：切换标志位 + 展开/收起自定义面板（User-Agent /
+  // 计费归因块文本可编辑，缺省 fallback 到 anthropic.js 的默认值）。不重建卡片——请求体框里
+  // 展示的仍是用户可编辑的原始模板，伪装只在 executeProbe 实际发出请求那一刻生效。
+  const mimicToggle = $('#mimicToggle');
+  const mimicPanel = $('#mimicPanel');
+  if (mimicToggle) {
+    mimicToggle.addEventListener('change', () => {
+      state.mimicClaudeCode = mimicToggle.checked;
+      if (mimicPanel) mimicPanel.classList.toggle('open', mimicToggle.checked);
+    });
+  }
   $('#runBtn').onclick = runAll;
   $('#summaryBtn').onclick = doSummary;
   $('#shareBtn').onclick = doShare;
@@ -221,6 +237,7 @@ function extraHeaders() {
   const h = {};
   const beta = $('#betaHeader').value.trim();
   if (beta && state.protocol === 'anthropic') h['anthropic-beta'] = beta;
+  if (state.protocol === 'anthropic' && state.mimicClaudeCode) Object.assign(h, mimicHeaders($('#mimicUA')?.value));
   return h;
 }
 
@@ -231,6 +248,9 @@ function extraHeaders() {
  */
 function renderCards() {
   const box = $('#cards');
+  // 重建卡片＝结果已失效（切协议/模型/深度/勾选/导入配置/重新检测）→ 清掉上一轮 AI 总结，
+  // 按钮恢复「生成 AI 总结」，避免旧总结与新结果不符。（runAll 会在检测完重新自动生成。）
+  clearSummary();
   // 重建前保留用户手动改过的请求体（按探针 id 记忆 .touched 的 textarea），
   // 这样切换模型/深度/勾选项重建卡片时，不会冲掉用户的自定义编辑。
   const edited = {};
@@ -309,7 +329,18 @@ function focusCard(id) {
 
 function buildCard(probe) {
   const model = $('#model').value.trim() || PROTOCOLS[state.protocol].defaultModel;
-  const tmpl = core.pretty(probe.defaultPayload(model));
+  // 合成探针（synthesize，如综合研判）不发请求，无 defaultPayload，请求列改为说明文字。
+  const isSynth = !!probe.synthesize;
+  const tmpl = isSynth ? '' : core.pretty(probe.defaultPayload(model));
+  const reqCol = isSynth
+    ? `<div class="col">
+            <label>📤 请求体<button class="btn btn-ghost btn-sm sendOne">合成</button></label>
+            <pre class="reqBox-note muted">本项不发请求：复用前序探针的判定结果与响应体进行综合研判。</pre>
+          </div>`
+    : `<div class="col">
+            <label>📤 请求体（可编辑）<button class="btn btn-ghost btn-sm sendOne">发送</button></label>
+            <textarea class="reqBox" spellcheck="false">${core.esc(tmpl)}</textarea>
+          </div>`;
   const card = document.createElement('div');
   card.className = 'card probe-card compact prerun';   // 初始紧凑且隐藏（未运行不展示）
   card.dataset.id = probe.id;
@@ -325,10 +356,7 @@ function buildCard(probe) {
       <details class="io-detail">
         <summary>📄 查看 / 编辑请求体与响应体</summary>
         <div class="pc-io">
-          <div class="col">
-            <label>📤 请求体（可编辑）<button class="btn btn-ghost btn-sm sendOne">发送</button></label>
-            <textarea class="reqBox" spellcheck="false">${core.esc(tmpl)}</textarea>
-          </div>
+          ${reqCol}
           <div class="col">
             <label>📥 响应体</label>
             <div class="resp-meta"></div>
@@ -358,12 +386,17 @@ async function runOne(probe, card) {
   const badge = card.querySelector('.vbadge');
   badge.className = 'vbadge skip'; badge.innerHTML = '<span class="spinner"></span> 运行中';
   setNavStatus(probe.id, 'running');
-  const reqBox = card.querySelector('.reqBox');
-  const parsed = core.parseJsonLoose(reqBox.value);
-  if (!parsed.ok) { setResult(card, { status: 'error', diffs: ['请求体不是合法 JSON: ' + parsed.error] }, probe); return; }
+  // 合成探针（synthesize）不发请求、无请求体框：payload 传 null，executeProbe 走合成分支。
+  let payload = null;
+  if (!probe.synthesize) {
+    const reqBox = card.querySelector('.reqBox');
+    const parsed = core.parseJsonLoose(reqBox.value);
+    if (!parsed.ok) { setResult(card, { status: 'error', diffs: ['请求体不是合法 JSON: ' + parsed.error] }, probe); return; }
+    payload = parsed.value;
+  }
 
   try {
-    const ctx = await executeProbe(probe, parsed.value);
+    const ctx = await executeProbe(probe, payload);
     const result = probe.analyze(ctx);
     result._ctx = ctx;
     state.results[probe.id] = { probe, result };
@@ -385,6 +418,15 @@ async function runOne(probe, card) {
  */
 async function executeProbe(probe, payload) {
   const c = cfg(), eh = extraHeaders();
+  // 「伪装为 Claude Code 官方客户端」：仅 Claude 协议 + 开关开启时生效。在入口处统一
+  // 对主 payload 做一次伪装变换（往 system 插计费归因块 + 填 metadata.user_id），
+  // 后续所有分支（multi/tokenPair/dualStream/dualFixed/普通）都从这个已伪装的 payload
+  // 派生（深拷贝/浅拷贝追加字段），天然继承伪装，无需逐分支打补丁。
+  // 报告页「查看请求体」展示的也是这份已伪装内容——更真实可查（实际发出的就是它）。
+  const wire = (pl) => (state.protocol === 'anthropic' && state.mimicClaudeCode)
+    ? mimicClaudeCodePayload(pl, $('#mimicBilling')?.value)
+    : pl;
+  payload = wire(payload);
   const base = { model: $('#model').value.trim(), requestPayload: payload, shared: sharedCtx(), httpStatus: 0, headers: {}, body: '', json: null };
 
   const send = async (pl) => {
@@ -392,6 +434,15 @@ async function executeProbe(probe, payload) {
     const parsed = r.body ? core.parseJsonLoose(r.body) : { ok: false };
     return { raw: r, json: parsed.ok ? parsed.value : null };
   };
+
+  // 合成探针（synthesize）：不发任何请求，注入 evidence（前序探针响应体快照）供综合研判深扫。
+  if (probe.synthesize) {
+    return { ...base, synthesized: true, evidence: collectEvidence(), httpStatus: null, headers: {}, body: '', json: null };
+  }
+  // 回链探针（trace）：start（后端注入公网回链 URL 并转发视觉请求）→ 轮询 logs 收集下图节点 IP。
+  if (probe.trace) {
+    return await executeTrace(c, eh, payload, base);
+  }
 
   if (probe.multi) {
     const runs = [];
@@ -420,8 +471,9 @@ async function executeProbe(probe, payload) {
   if (probe.dualFixed) {
     // 双固定句对照：发 A=payload（主句）与 B=probe.payloadB（对照句），两条都是固定输入、
     // 不追加长文本（区别于 tokenPair）。用于 max_output_tokens 强验真 + input_tokens 双基线注入检测。
+    // payloadB 是探针独立生成的新对象（非从 payload 派生），需单独 wire。
     const a = await send(payload);
-    const payloadB = probe.payloadB ? probe.payloadB($('#model').value.trim()) : payload;
+    const payloadB = probe.payloadB ? wire(probe.payloadB($('#model').value.trim())) : payload;
     const b = state.mode === 'Q' ? null : await send(payloadB);
     const rounds = [{ label: 'A·主句', body: a.raw.body, httpStatus: a.raw.httpStatus, id: a.json?.id }];
     if (b) rounds.push({ label: 'B·对照句', body: b.raw.body, httpStatus: b.raw.httpStatus, id: b.json?.id });
@@ -444,10 +496,70 @@ async function executeProbe(probe, payload) {
 }
 
 function sharedCtx() {
-  // 跨探针共享：渠道判定、注入信号等。stage 串行保证后序探针读到前序写入。
+  // 跨探针共享：渠道判定、注入信号、响应头指纹、回链末端上游等。stage 串行保证后序探针读到前序写入。
   const ch = state.results.channel_id?.result?._ctx?.shared?.channel;
   const inj = state.results.param_check?.result?._ctx?.shared?.injection;
-  return { channel: ch || null, injection: inj || null };
+  const up = state.results.upstream_trace?.result?._ctx?.shared;
+  return { channel: ch || null, injection: inj || null, upstream: up?.upstream || null, headers: up?.headers || null };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function safeParse(body) { const p = core.parseJsonLoose(body || ''); return p.ok ? p.value : null; }
+
+/* 汇总前序探针的响应体（含多轮）+ 响应头，供合成探针（综合研判）深扫 Azure 审核签名等。 */
+function collectEvidence() {
+  const samples = [];
+  for (const entry of Object.values(state.results)) {
+    const ctx = entry && entry.result && entry.result._ctx;
+    if (!ctx) continue;
+    const pid = entry.probe && entry.probe.id;
+    if (ctx.json) samples.push({ probe: pid, json: ctx.json, headers: ctx.headers || {} });
+    if (Array.isArray(ctx.rounds)) {
+      for (const rd of ctx.rounds) {
+        if (!rd || !rd.body) continue;
+        const v = safeParse(rd.body);
+        if (v) samples.push({ probe: pid, json: v, headers: ctx.headers || {} });
+      }
+    }
+  }
+  return samples;
+}
+
+/* 回链探测编排：start → 轮询 logs（最多 ~9s，命中后再多收 1 拍尽量收齐多个节点）。 */
+async function executeTrace(c, eh, payload, base) {
+  try {
+    const start = await core.traceStart(c, payload, eh);
+    if (!start || !start.ok) {
+      return { ...base, traceError: (start && start.error) || '后端 trace 接口不可用（需部署 api/trace.php 且公网可达）', traceHits: [], httpStatus: start?.httpStatus ?? 0, body: start?.body || '', json: safeParse(start?.body) };
+    }
+    const sid = start.sid, imgUrl = start.imgUrl;
+    let hits = [], settled = 0;
+    for (let i = 0; i < 9; i++) {
+      await sleep(1000);
+      const lg = await core.traceLogs(sid);
+      if (lg && Array.isArray(lg.hits) && lg.hits.length) { hits = lg.hits; settled++; if (settled >= 2) break; }
+    }
+    // 把回链捕获结果格式化成可读文本，作为「响应体」展示（像参考项目：IP+来源+org+UA+抓图头）。
+    const captured = hits.length
+      ? hits.map((h, i) => {
+          const place = [h.city, h.region, h.country].filter(Boolean).join(' / ');
+          const hdrLines = h.headers ? Object.entries(h.headers).map(([k, v]) => `    ${k}: ${v}`).join('\n') : '';
+          return `下图节点 #${i + 1}\n`
+            + `  出口 IP：${h.ip || '?'}（来源头：${h.ipSource || '?'}）\n`
+            + `  归属：${h.label || h.org || '未知'}${h.as ? '  ' + h.as : ''}\n`
+            + (place ? `  位置：${place}\n` : '')
+            + `  出口 UA：${h.ua || '(无)'}${h.uaKind ? '  → 自报 ' + h.uaKind : ''}\n`
+            + (hdrLines ? `  抓图请求头：\n${hdrLines}` : '');
+        }).join('\n\n')
+      : '（本次回链未捕获到任何下图节点）\n可能原因：上游只认 base64 不 fetch URL / 本站非公网可达 / 该渠道无视觉能力 / 上游纯转发不下图。';
+    const rounds = [
+      { label: '① 回链视觉请求 → 上游响应', body: start.body || '', httpStatus: start.httpStatus, id: start.json?.id },
+      { label: `② 回链捕获结果（命中 ${hits.length} 个下图节点）`, body: captured, httpStatus: hits.length ? 200 : 0 },
+    ];
+    return { ...base, evidence: collectEvidence(), httpStatus: start.httpStatus, headers: {}, body: start.body || '', json: safeParse(start.body), traceImgUrl: imgUrl, traceHits: hits, rounds };
+  } catch (e) {
+    return { ...base, evidence: collectEvidence(), traceError: e.message, traceHits: [] };
+  }
 }
 
 function appendLongText(payload) {
@@ -501,7 +613,12 @@ function setResult(card, result, probe, ctx) {
   const io = card.querySelector('.io-detail');
   if (io) io.open = result.severity === 'critical' || b.cls === 'fail' || result.status === 'error';
 
-  if (ctx) {
+  if (ctx && ctx.synthesized) {
+    const meta = card.querySelector('.resp-meta');
+    if (meta) meta.innerHTML = '<span class="muted">合成研判 · 无网络请求</span>';
+    const pre0 = card.querySelector('.respBox');
+    if (pre0) { pre0.classList.remove('muted'); pre0.textContent = '（本项不发请求，结论见下方「特征 / 差异」）'; }
+  } else if (ctx) {
     const meta = card.querySelector('.resp-meta');
     const codeCls = ctx.httpStatus >= 200 && ctx.httpStatus < 300 ? 'code-ok' : 'code-bad';
     const pre = card.querySelector('.respBox');
@@ -575,11 +692,8 @@ async function runAll() {
   if (!cfg().targetUrl) { toast('请先填写接口地址'); return; }
   const btn = $('#runBtn'); btn.disabled = true; btn.textContent = '检测中…';
   state.results = {};
-  // 清掉上一轮的 AI 总结，避免重新检测后旧总结还残留在界面上（与本轮结果不符）。
-  state.lastSummary = '';
-  const sb = $('#summaryBox'); if (sb) { sb.textContent = ''; sb.style.display = 'none'; }
-  // 重新检测：用当前「模型 / 检测深度 / 勾选项」从头重建卡片（保留手改的请求体），
-  // 既保证请求用的是最新模型名，也让每次检测都从干净状态开始。
+  // 重新检测：用当前「模型 / 检测深度 / 勾选项」从头重建卡片（保留手改的请求体）。
+  // renderCards() 内部已 clearSummary（清掉上一轮 AI 总结），检测完会自动重新生成。
   renderCards();
   const cards = $$('#cards .probe-card');
   const probes = selectedProbes();
@@ -600,8 +714,10 @@ async function runAll() {
   btn.disabled = false; btn.textContent = '🟢 开始检测';
   updateOverview();
   reflowCards();
-  saveHistory();   // 整套检测跑完 → 自动存一条历史快照到本地（单项「发送」不触发）
   toast('检测完成');
+  // 检测完成后自动生成 AI 总结，展示在综合分下方（失败静默回退本地规则总结）。
+  await doSummary(true);
+  saveHistory();   // 总结生成后再存历史快照，使快照含 summary（单项「发送」不触发）
 }
 
 /* ---------------- 总览 ---------------- */
@@ -623,22 +739,30 @@ function updateOverview() {
   const cvRes = state.results.codex_verdict?.result;
   if (cvRes && cvRes.conclusion) {
     const c = cvRes.conclusion;
+    // 渠道徽标的归类码：Codex→claudecode，Azure→azure，OpenAI/官方→openai，存疑/未知→unknown，套壳→foreign
+    const codeOf = (s) => {
+      if (s.indexOf('Codex') >= 0) return 'claudecode';
+      if (s.indexOf('Azure') >= 0) return 'azure';
+      if (s.indexOf('OpenAI') >= 0 || s.indexOf('官方') >= 0) return 'openai';
+      return 'unknown';
+    };
     if (cvRes.severity === 'critical') {
       // 非官渠道（套壳/逆向）→ 硬否决：总分封顶 30、评级不可信、渠道改显研判结论
       total = Math.min(total, 30);
       level = 'fail'; verdict = '不可信（研判：' + c + '）'; hasCritical = true;
       ch = { channel: c, code: 'foreign' };
     } else if (cvRes.verdict === '存疑') {
-      // 疑网关/逆向、或疑提示词注入 → 总分压到「存疑」区间，渠道如实标注研判结论
+      // 疑网关/逆向、疑注入、或「无法确定归属」→ 总分压到「存疑」区间，渠道如实标注研判结论
       total = Math.min(total, 50);
       level = 'marginal'; verdict = '存疑（研判：' + c + '）';
-      ch = { channel: c, code: 'unknown' };
-    } else if (c === 'Codex CLI 渠道') {
-      // Codex 经官方上游、协议特征齐全：总分不封顶，但渠道如实显示为 Codex CLI
-      ch = { channel: 'Codex CLI', code: 'claudecode' };
-      if (level === 'excellent') verdict = '高度可信（Codex CLI 渠道）';
+      ch = { channel: c, code: codeOf(c) };
+    } else {
+      // 真·结论（Codex / Azure / OpenAI 官方 / 基本官方 / 倾向官方）：渠道如实显示末端上游结论，
+      // 按归属上色；不封顶总分。中转软件只是传输层，不出现在结论里。
+      ch = { channel: c, code: codeOf(c) };
+      if (level === 'excellent' && c.indexOf('倾向') < 0) verdict = '高度可信（' + c + '）';
+      else verdict = (verdict || '') + '（研判：' + c + '）';
     }
-    // 纯官方直连 → 不修正
   }
 
   const colors = { excellent: 'var(--pass)', pass: 'var(--pass)', marginal: 'var(--warn)', fail: 'var(--fail)' };
@@ -654,16 +778,27 @@ function updateOverview() {
 }
 
 /* ---------------- GLM 总结 ---------------- */
-async function doSummary() {
-  if (!Object.keys(state.results).length) { toast('请先运行检测'); return; }
-  const btn = $('#summaryBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 生成中';
-  const payload = buildReportPayload();
-  const r = await core.generateSummary(payload);
+/* 清空 AI 总结：切换协议/模型/深度/勾选项等导致旧结果失效时调用，按钮恢复「生成 AI 总结」。 */
+function clearSummary() {
+  state.lastSummary = '';
+  const box = $('#summaryBox');
+  if (box) { box.textContent = ''; box.style.display = 'none'; }
+  const btn = $('#summaryBtn');
+  if (btn) { btn.disabled = false; btn.textContent = '🤖 生成 AI 总结'; }
+}
+
+async function doSummary(auto = false) {
+  if (!Object.keys(state.results).length) { if (!auto) toast('请先运行检测'); return; }
+  const btn = $('#summaryBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 生成中'; }
   const box = $('#summaryBox');
   box.style.display = '';
+  box.textContent = '🤖 正在生成 AI 总结…';
+  const payload = buildReportPayload();
+  const r = await core.generateSummary(payload);
   if (r.ok) { state.lastSummary = r.summary; box.textContent = r.summary; }
   else { box.textContent = localSummary(payload) + '\n\n（注：GLM 未配置或调用失败，以上为本地规则总结。）'; state.lastSummary = box.textContent; }
-  btn.disabled = false; btn.textContent = '🤖 生成 AI 总结';
+  if (btn) { btn.disabled = false; btn.textContent = '🤖 重新生成 AI 总结'; }
 }
 
 function localSummary(p) {

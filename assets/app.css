@@ -188,6 +188,38 @@ details.adv summary:hover { color: var(--ink); }
 .probe-toggles input { width: auto; accent-color: var(--claude); }
 .probe-toggles .w { opacity: .6; font-size: 11px; }
 
+/* ---------- 开关行（伪装 Claude Code 等布尔项，滑动开关样式） ---------- */
+.switch-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px 4px; background: var(--paper-2); border: 1px solid var(--line); border-radius: 10px 10px 0 0;
+}
+.switch-row .switch-label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.switch-hint {
+  font-size: 11.5px; color: var(--ink-faint); line-height: 1.5;
+  padding: 4px 14px 11px; background: var(--paper-2); border: 1px solid var(--line); border-top: none; border-radius: 0 0 10px 10px;
+}
+.switch { position: relative; display: inline-block; width: 38px; height: 22px; flex-shrink: 0; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch .track {
+  position: absolute; inset: 0; background: var(--line); border-radius: 999px; transition: background .15s;
+}
+.switch .thumb {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(20,17,12,.25); transition: transform .15s;
+}
+.switch input:checked + .track { background: var(--claude); }
+.switch input:checked + .track .thumb { transform: translateX(16px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.mimic-panel {
+  margin-top: 10px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  display: none;
+}
+.mimic-panel.open { display: block; }
+.mimic-panel .field { margin-bottom: 10px; }
+.mimic-panel .field:last-child { margin-bottom: 0; }
+.mimic-panel .field label { font-size: 11.5px; }
+
 /* ---------- 配置库（右侧悬浮，与左侧「检测项目录」对称） ----------
  * 默认：fixed 悬浮在正文（居中 .wrap 最大 1080px）右侧留白处；
  * 窄屏（放不下）：降级为正文内一条静态卡片，正常排在协议 tab 下方。 */
@@ -314,6 +346,9 @@ details.adv summary:hover { color: var(--ink); }
 .badge.bedrock   { background: rgba(66,133,244,.12); color: var(--gemini); border-color: var(--gemini); }
 .badge.vertex    { background: rgba(16,163,127,.12); color: var(--codex);  border-color: var(--codex); }
 .badge.openai_shape, .badge.foreign { background: rgba(192,57,43,.10); color: var(--crit); border-color: var(--crit); }
+.badge.azure { background: rgba(0,120,212,.12); color: #0078d4; border-color: #0078d4; border-left: 3px solid #0078d4; font-weight: 700; }
+.badge.openai { background: rgba(16,163,127,.12); color: var(--codex); border-color: var(--codex); }
+.badge.relay { background: rgba(180,120,20,.12); color: #a8741a; border-color: #a8741a; border-left: 3px solid #a8741a; font-weight: 700; }
 .badge.unknown { background: var(--paper-2); color: var(--ink-faint); }
 
 .crit-banner {

@@ -180,6 +180,7 @@ details.adv summary:hover { color: var(--ink); }
 .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .btn-ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
 .btn-ghost:hover { border-color: var(--ink-faint); }
+.btn-ghost:disabled { opacity: .6; cursor: not-allowed; color: var(--ink-faint); }
 .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
 
 /* ---------- 探针勾选 ---------- */

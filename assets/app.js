@@ -386,12 +386,21 @@ async function runOne(probe, card) {
   const badge = card.querySelector('.vbadge');
   badge.className = 'vbadge skip'; badge.innerHTML = '<span class="spinner"></span> 运行中';
   setNavStatus(probe.id, 'running');
+  // 运行反馈同步落在「发送」按钮上（按钮离用户点击处最近，比顶部徽标更容易被看到），
+  // 同时禁用按钮防止运行期间被反复点击。
+  const sendBtn = card.querySelector('.sendOne');
+  const sendBtnOrigText = sendBtn ? sendBtn.textContent : '';
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<span class="spinner"></span> 运行中'; }
   // 合成探针（synthesize）不发请求、无请求体框：payload 传 null，executeProbe 走合成分支。
   let payload = null;
   if (!probe.synthesize) {
     const reqBox = card.querySelector('.reqBox');
     const parsed = core.parseJsonLoose(reqBox.value);
-    if (!parsed.ok) { setResult(card, { status: 'error', diffs: ['请求体不是合法 JSON: ' + parsed.error] }, probe); return; }
+    if (!parsed.ok) {
+      setResult(card, { status: 'error', diffs: ['请求体不是合法 JSON: ' + parsed.error] }, probe);
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = sendBtnOrigText; }
+      return;
+    }
     payload = parsed.value;
   }
 
@@ -404,6 +413,7 @@ async function runOne(probe, card) {
   } catch (e) {
     setResult(card, { status: 'error', diffs: ['执行异常: ' + e.message] }, probe);
   }
+  if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = sendBtnOrigText; }
   updateOverview();
   reflowCards();
 }

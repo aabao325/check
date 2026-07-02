@@ -6,8 +6,8 @@
  * 探针顺序：渠道识别(0)→身份识别(1)→…→参数检测(2)，身份判定的渠道（如 Codex CLI）
  * 写入 ctx.shared.channel 供 param_check 读取。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=25';
-import { scanAzureContentFilter, scanResponseHeaders, decideConclusion } from './openai_signals.js?v=25';
+import { coefficientOfVariation } from '../core.js?v=26';
+import { scanAzureContentFilter, scanResponseHeaders, decideConclusion } from './openai_signals.js?v=26';
 
 // 回链探测：请求体里图片 URL 的哨兵占位符。后端 trace.php?action=start 会把它替换成
 // 本站公网可达的回链地址——这样「前端构造并展示请求体」的约定不变，真实 URL 由后端注入。

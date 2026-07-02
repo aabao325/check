@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=26">
+  <link rel="stylesheet" href="assets/app.css?v=28">
 </head>
 <body>
 <div class="wrap">
@@ -132,6 +132,14 @@
             </div>
           </div>
         </div>
+        <div class="field" id="longCtxRow">
+          <label>长上下文分档（长上下文真实性探针，仅 Claude 完整档生效）</label>
+          <div class="tier-toggles" id="longCtxTiers"></div>
+          <div class="muted" style="font-size:11.5px;line-height:1.5;margin-top:6px">
+            500k/800k/1000k 已超出 Claude 标准 200k 上下文，若要测试需自行在上方 anthropic-beta 头加入长上下文扩展标识，且单次请求可能消耗几十万至百万 token（费用较高）。
+            大档位请求体可能达数 MB，请确认服务器 PHP post_max_size 足够；若响应缓慢导致后端转发超时，可在 <code>api/config.php</code> 调大 <code>PROBE_TIMEOUT</code>。
+          </div>
+        </div>
         <div class="field" id="probeToggleRow">
           <label>勾选要运行的检测项（按检测深度自动预选，专业用户可微调）</label>
           <div class="probe-toggles" id="probeToggles"></div>
@@ -229,6 +237,6 @@
   </div>
 </div>
 
-<script src="assets/app.js?v=26" type="module"></script>
+<script src="assets/app.js?v=28" type="module"></script>
 </body>
 </html>

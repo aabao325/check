@@ -7,7 +7,7 @@
  * 思考参数代际：2.5 系用 thinkingBudget、3 系用 thinkingLevel；错代参数对 2.5 会被官方拒绝，
  * 对 3 系则向后兼容静默接受（验不了真）。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=26';
+import { coefficientOfVariation } from '../core.js?v=28';
 
 /* ---------- 小工具 ---------- */
 // 取最终文本：candidates[0].content.parts[].text 拼接；防 SAFETY 拦截时 parts undefined。

@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=26';
-import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=26';
-import { openaiProtocol } from './protocols/openai.js?v=26';
-import { geminiProtocol } from './protocols/gemini.js?v=26';
+import * as core from './core.js?v=28';
+import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=28';
+import { openaiProtocol } from './protocols/openai.js?v=28';
+import { geminiProtocol } from './protocols/gemini.js?v=28';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -36,7 +36,7 @@ const PROBE_DESC = {
   vision_pdf: '多模态：发 PDF/图片魔法串，检查是否真能识别（区分渠道限制与不具备多模态）。',
   integrity: '流式/非流式一致性：同请求两种方式结果应一致。',
   cache_behavior: 'Prompt 缓存行为：两轮同请求应「创建→命中」缓存（cache_creation/cache_read），套壳常无此能力。',
-  token_usage: 'Token 计费核验：用官方 count_tokens 对比响应 usage，识别虚报/降级。',
+  token_usage: 'Token 计费核验：用官方 count_tokens 对比响应 usage，识别虚报/降级；同时检查 cache_read/cache_creation_input_tokens——本探针请求从不声明 cache_control，若出现缓存 token 或 input_tokens 明显偏高，疑似中转层注入了额外提示词：若已判定为 Claude Code 官方 CLI（其内置系统提示词走缓存属正常）记「不适用」，否则记 0 分。',
   token_billing: 'Token 计费核验：检查 Responses 的 usage（input_tokens/output_tokens/total_tokens）字段完整且自洽，长短 prompt 增量合理。',
   model_consistency: '同一请求多次发送，检查响应 model 名稳定、output_tokens 方差合理（防随机换模型）。',
   model_info: '同一请求多次发送，检查响应 modelVersion 稳定、token 方差合理（防随机换模型）。',
@@ -46,7 +46,7 @@ const PROBE_DESC = {
   codex_verdict: '综合研判（信息项·零请求）：复用前序探针结果与响应头本地合成上游归属结论。优先级：one-api/new-api 中转软件透传判别 > Azure(x-ms-*/审核签名) > OpenAI(openai-*)。原则：① 无响应头指纹、无回链出口证据时不武断下「纯官/Azure」定论，只给存疑并讲清原因；② 身份自述 codex 可断言 Codex；③ 回源出口 IP=微软云可基本判断为官方。响应头/UA 可被透传或伪造，故多维交叉、存疑必说明。',
   thinking_probe: '思考能力 + 参数代际验真：发与模型代匹配的思考参数（3 系 thinkingLevel / 2.5 系 thinkingBudget），看 thoughtsTokenCount>0；对 2.5 系额外发新版参数验证官方会拒绝错代参数。',
   error_shape: '弃用参数验真：发 temperature/top_p（最新 Claude 已弃用）。真官方上游会报「不支持/已弃用」=验真正向信号；不报错≠假（网关可能静默忽略），记“不适用”，需自行与渠道商确认。',
-  long_context: '长上下文真实性：植入暗号到约 32k/100k token 大文本，检查是否被截断。',
+  long_context: '长上下文真实性：按勾选档位（默认 32k/100k/200k，可加选 500k/800k/1000k）分别构造真实长文本并各植入独立暗号，按找回结果反推真实支持的上下文长度上限；官方正确拒绝超长请求视为中性，不计入失败。',
 };
 
 const state = {
@@ -112,6 +112,10 @@ function selectProtocol(id) {
   // 「伪装为 Claude Code 官方客户端」仅对 Claude 协议有意义
   const mimicRow = $('#mimicRow');
   if (mimicRow) mimicRow.style.display = id === 'anthropic' ? '' : 'none';
+  // 「长上下文分档」仅对 Claude 协议有意义（long_context 探针仅存在于 anthropicProtocol）
+  const longCtxRow = $('#longCtxRow');
+  if (longCtxRow) longCtxRow.style.display = id === 'anthropic' ? '' : 'none';
+  if (id === 'anthropic') renderLongCtxTiers();
   // 「完整（含长上下文）」档仅 Claude 有意义；OpenAI/Gemini 无此检测，隐藏该档
   const fBtn = $('#modeBtns .mode-btn[data-mode="F"]');
   const allowF = id === 'anthropic';
@@ -500,6 +504,25 @@ async function executeProbe(probe, payload) {
     ];
     return { ...base, httpStatus: ns.raw.httpStatus, headers: ns.raw.headers, body: ns.raw.body, json: ns.json, nonStreamJson: ns.json, streamMessage: sse?.message, rounds };
   }
+  if (probe.tierNeedle) {
+    // 长上下文分档 needle-in-haystack：按 #longCtxTiers 勾选框选中的档位逐一发送，
+    // 一旦某档命中"超出上下文窗口"错误就跳过更大档位（必然也超限，省 token）。
+    const selected = selectedLongContextTierKeys();
+    const plan = probe.buildTierPlan($('#model').value.trim(), selected);
+    const rounds = [];
+    const tierResults = [];
+    let bail = false;
+    for (const t of plan) {
+      if (bail) { tierResults.push({ key: t.key, label: t.label, tokens: t.tokens, skipped: true }); continue; }
+      const r = await send(wire(t.payload));
+      const verdict = probe.analyzeTierResult(t, r);
+      rounds.push({ label: `${t.label}档`, body: r.raw.body, httpStatus: r.raw.httpStatus, id: r.json?.id });
+      tierResults.push({ key: t.key, label: t.label, tokens: t.tokens, needle: t.needle, found: verdict.found, exceeded: verdict.exceeded, httpStatus: r.raw.httpStatus });
+      if (verdict.exceeded) bail = true;
+    }
+    const lastR = rounds[rounds.length - 1];
+    return { ...base, httpStatus: lastR?.httpStatus ?? 0, headers: {}, body: lastR?.body ?? '', json: safeParse(lastR?.body || ''), rounds, tiers: tierResults };
+  }
   // stream 或普通
   const r = await send(payload);
   return { ...base, httpStatus: r.raw.httpStatus, headers: r.raw.headers, body: r.raw.body, json: r.json, requestId: r.raw.requestId };
@@ -511,6 +534,22 @@ function sharedCtx() {
   const inj = state.results.param_check?.result?._ctx?.shared?.injection;
   const up = state.results.upstream_trace?.result?._ctx?.shared;
   return { channel: ch || null, injection: inj || null, upstream: up?.upstream || null, headers: up?.headers || null };
+}
+
+function selectedLongContextTierKeys() {
+  return $$('#longCtxTiers input[type=checkbox]:checked').map((cb) => cb.dataset.tier);
+}
+
+function renderLongCtxTiers() {
+  const box = $('#longCtxTiers');
+  if (!box) return;
+  box.innerHTML = '';
+  const tiers = PROTOCOLS[state.protocol]?.longContextTiers || [];
+  for (const t of tiers) {
+    const label = document.createElement('label');
+    label.innerHTML = `<input type="checkbox" data-tier="${t.key}" ${t.default ? 'checked' : ''}> ${t.label}`;
+    box.appendChild(label);
+  }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

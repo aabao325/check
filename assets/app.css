@@ -189,6 +189,11 @@ details.adv summary:hover { color: var(--ink); }
 .probe-toggles input { width: auto; accent-color: var(--claude); }
 .probe-toggles .w { opacity: .6; font-size: 11px; }
 
+/* ---------- 长上下文分档勾选 ---------- */
+.tier-toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.tier-toggles label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
+.tier-toggles input { width: auto; accent-color: var(--claude); }
+
 /* ---------- 开关行（伪装 Claude Code 等布尔项，滑动开关样式） ---------- */
 .switch-row {
   display: flex; align-items: center; gap: 10px;

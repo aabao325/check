@@ -12,7 +12,7 @@
  *
  * 思路全部吸收自 veridrop 的 anthropic detectors（权重、阈值对齐）。
  * ===================================================================== */
-import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=26';
+import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=28';
 
 // 多模态魔法串（PDF 探针）。
 const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
@@ -744,15 +744,42 @@ const token_usage = {
     // 运行器提供 shortJson / longJson
     const s = ctx.shortJson || ctx.json, l = ctx.longJson;
     if (!s) return errored('无响应');
-    const features = [], diffs = []; let score = 0;
+    const features = [], diffs = [];
     const sIn = s.usage?.input_tokens, sOut = s.usage?.output_tokens;
+    const sCacheRead = Number(s.usage?.cache_read_input_tokens || 0);
+    const sCacheCreate = Number(s.usage?.cache_creation_input_tokens || 0);
     features.push(`短请求 input/output: ${sIn}/${sOut}`);
+    if (sCacheRead || sCacheCreate) features.push(`短请求缓存：创建 ${sCacheCreate} / 读取 ${sCacheRead} token`);
+
+    let lIn, delta, lCacheRead = 0, lCacheCreate = 0;
+    if (l) {
+      lIn = l.usage?.input_tokens;
+      delta = (typeof lIn === 'number' && typeof sIn === 'number') ? lIn - sIn : null;
+      lCacheRead = Number(l.usage?.cache_read_input_tokens || 0);
+      lCacheCreate = Number(l.usage?.cache_creation_input_tokens || 0);
+      features.push(`长请求 input: ${lIn}，增量: ${delta}`);
+      if (lCacheRead || lCacheCreate) features.push(`长请求缓存：创建 ${lCacheCreate} / 读取 ${lCacheRead} token`);
+    }
+
+    // 本探针请求体从不携带 cache_control，官方直连正常不该产生任何缓存 token；
+    // 若出现缓存读写，或短请求 input_tokens 明显偏高（远超"Reply with exactly: ok"应有的约 16），
+    // 说明中转层很可能注入了额外的（且被缓存的）系统提示词。
+    const cacheSeen = sCacheRead > 0 || sCacheCreate > 0 || lCacheRead > 0 || lCacheCreate > 0;
+    const inputInflated = typeof sIn === 'number' && sIn > 60;
+    if (cacheSeen || inputInflated) {
+      const isClaudeCode = ctx.shared?.channel?.code === 'claudecode';
+      if (isClaudeCode) {
+        features.push('检测到缓存 token 或 input_tokens 偏高，但渠道已判定为 Claude Code 官方 CLI → 其内置系统提示词走 prompt caching 属正常现象');
+        return { features, diffs, score: null, verdict: '不适用', severity: '', status: 'done' };
+      }
+      diffs.push('未声明 cache_control 却出现缓存 token，或 input_tokens 明显偏高 → 疑似中转层注入了额外提示词');
+      return { features, diffs, score: 0, verdict: '假', severity: '', status: 'done' };
+    }
+
+    let score = 0;
     if (typeof sIn === 'number' && typeof sOut === 'number') score += 30; else diffs.push('usage 字段缺失');
     if (typeof sOut === 'number' && sOut <= 24) score += 20; else diffs.push(`输出 token 异常偏大: ${sOut}`);
     if (l) {
-      const lIn = l.usage?.input_tokens;
-      const delta = (typeof lIn === 'number' && typeof sIn === 'number') ? lIn - sIn : null;
-      features.push(`长请求 input: ${lIn}，增量: ${delta}`);
       if (delta != null && delta >= 60 && delta <= 260) score += 30;
       else if (delta != null) diffs.push(`长短 prompt token 增量异常(${delta}) → 计费可疑`);
       else score += 30;
@@ -803,24 +830,94 @@ const error_shape = {
   },
 };
 
+/* 长上下文分档定义：默认跑 32k/100k/200k（覆盖 Claude 标准上下文窗口即可验真基础能力）；
+   500k/800k/1000k 已超出标准窗口，需要用户自行在 anthropic-beta 头加长上下文扩展标识、且单次
+   消耗几十万至百万 token，费用高，故默认不勾选，交由用户在「自定义检测项与高级设置」里手动开启。 */
+const LONG_CONTEXT_TIERS = [
+  { key: 't32k', label: '32k', tokens: 32000, default: true },
+  { key: 't100k', label: '100k', tokens: 100000, default: true },
+  { key: 't200k', label: '200k', tokens: 200000, default: true },
+  { key: 't500k', label: '500k', tokens: 500000, default: false },
+  { key: 't800k', label: '800k', tokens: 800000, default: false },
+  { key: 't1000k', label: '1000k(1M)', tokens: 1000000, default: false },
+];
+const LONG_CTX_CHARS_PER_TOKEN = 4; // 粗略估算（真实按官方 tokenizer 会有出入，仅用于构造"约"多少 token 的填充量）
+const LONG_CTX_FILLER_SENTENCES = [
+  'The history of long-distance communication stretches back centuries, from smoke signals to fiber optics.',
+  'Coral reefs support roughly a quarter of all marine species despite covering less than one percent of the ocean floor.',
+  'Early cartographers relied on celestial navigation to chart unexplored coastlines.',
+  'A well-tuned orchestra depends on every musician listening as closely as they play.',
+  'Glaciers advance and retreat over centuries, carving valleys that outlast empires.',
+  'The printing press changed how quickly ideas could spread across a continent.',
+  'Deep-sea vents host ecosystems that never see sunlight yet teem with life.',
+  'Migratory birds travel thousands of kilometers guided by magnetic fields they cannot see.',
+];
+function buildLongCtxFiller(charTarget) {
+  const parts = [];
+  let len = 0, i = 0;
+  while (len < charTarget) {
+    const s = LONG_CTX_FILLER_SENTENCES[i % LONG_CTX_FILLER_SENTENCES.length];
+    parts.push(s);
+    len += s.length + 1;
+    i++;
+  }
+  return parts.join(' ');
+}
+function randLongCtxTag(n = 4) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < n; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+function buildTierPlan(model, selectedKeys) {
+  return LONG_CONTEXT_TIERS.filter((t) => (selectedKeys || []).includes(t.key)).map((t) => {
+    const needle = `NEEDLE-${t.label.replace(/[^0-9A-Z]/gi, '').toUpperCase()}-${randLongCtxTag()}`;
+    const filler = buildLongCtxFiller(t.tokens * LONG_CTX_CHARS_PER_TOKEN);
+    const mid = Math.floor(filler.length / 2);
+    const haystack = `${filler.slice(0, mid)}\n\n[SECRET CODE: ${needle}]\n\n${filler.slice(mid)}`;
+    const content = `下面是一段很长的参考文本，其中在某处藏有一个唯一的暗号，格式为 NEEDLE-XXX-XXXX。请仔细通读全部文本，找到这个暗号，并只回复该暗号本身，不要输出其他任何内容。\n\n${haystack}`;
+    return { key: t.key, label: t.label, tokens: t.tokens, needle, payload: { model, max_tokens: 64, messages: [{ role: 'user', content }] } };
+  });
+}
+function isContextExceededError(json) {
+  if (!isAnthropicError(json)) return false;
+  const msg = String(json.error?.message || '');
+  return /too long|too many tokens|exceeds|maximum context|context length|context window|prompt is too long/i.test(msg);
+}
+function analyzeTierResult(tierDef, sendResult) {
+  const j = sendResult.json;
+  const text = textOf(j);
+  const exceeded = isContextExceededError(j);
+  const found = !!text && text.includes(tierDef.needle);
+  return { found, exceeded };
+}
+
 const long_context = {
-  id: 'long_context', name: '长上下文真实性', weight: 15, modes: ['F'], heavy: true, needle: true,
+  id: 'long_context', name: '长上下文真实性', weight: 15, modes: ['F'], heavy: true, tierNeedle: true,
+  tiers: LONG_CONTEXT_TIERS, buildTierPlan, analyzeTierResult,
   defaultPayload: (m) => ({
-    model: m, max_tokens: 256,
-    messages: [{ role: 'user', content: '【注意：完整长上下文探针由运行器自动构造约 32k/100k token 的大文本并植入暗号，此处仅为占位。直接发送将只测一个小样本。】\n\n下面是一些文本，其中藏有暗号 NEEDLE-ALPHA-7Q2。请找出暗号并原样返回。\n\n（填充文本）……NEEDLE-ALPHA-7Q2……（填充文本）' }],
+    model: m, max_tokens: 64,
+    messages: [{ role: 'user', content: '【说明：本探针按已勾选的档位（默认 32k/100k/200k，可在「自定义检测项与高级设置」里加选 500k/800k/1000k）在点击"开始检测"或本卡片"发送"时自动构造真实长文本并各植入独立暗号，逐档验证是否找回；这里仅展示占位请求体供预览，不代表实际发出的内容。】' }],
   }),
   analyze(ctx) {
-    const text = textOf(ctx.json);
+    const tiers = ctx.tiers || [];
     const features = [], diffs = [];
-    if (!text) return fail('无响应');
-    // 简化版：检查是否找回 needle（运行器可扩展为多 tier）
-    const needles = ctx.needles || ['NEEDLE-ALPHA-7Q2'];
-    const found = needles.filter((n) => text.includes(n));
-    features.push(`植入暗号 ${needles.length} 个，找回 ${found.length} 个`);
-    const ratio = found.length / needles.length;
-    let score = Math.round(ratio * 100);
-    if (ratio < 1) diffs.push('部分/全部暗号未找回 → 长上下文可能被截断');
-    if (ctx.tierInfo) features.push(ctx.tierInfo);
+    const attempted = tiers.filter((t) => !t.skipped);
+    if (!attempted.length) return fail('未选择任何档位，或全部档位无响应');
+    let maxOk = 0;
+    for (const t of attempted) {
+      if (t.exceeded) { features.push(`${t.label}档（约${t.tokens}token）：⛔ 官方正确报错"超出上下文窗口"（符合预期，不计入失败）`); continue; }
+      if (t.found) { features.push(`${t.label}档（约${t.tokens}token）：✓ 找回暗号`); maxOk = Math.max(maxOk, t.tokens); }
+      else { features.push(`${t.label}档（约${t.tokens}token）：✗ 未找回暗号`); diffs.push(`${t.label}档未找回暗号 → 该长度下内容可能被截断/丢弃`); }
+    }
+    const skipped = tiers.filter((t) => t.skipped);
+    if (skipped.length) features.push(`已自动跳过更大档位 ${skipped.map((t) => t.label).join('、')}（前一档已触达上下文上限，避免浪费 token）`);
+    const okCount = attempted.filter((t) => t.found && !t.exceeded).length;
+    const failCount = attempted.filter((t) => !t.found && !t.exceeded).length;
+    const denom = okCount + failCount;
+    if (!denom) return { features, diffs: ['全部已尝试档位均因超出上下文窗口被官方正确拒绝，无法据此判真或判假'], score: null, verdict: '不适用', severity: '', status: 'done' };
+    const score = Math.round((okCount / denom) * 100);
+    if (maxOk) features.push(`🏁 实测最大支持上下文：约 ${maxOk} token`);
     return { features, diffs, score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity: '', status: 'done' };
   },
 };
@@ -975,6 +1072,7 @@ export const anthropicProtocol = {
   defaultModel: 'claude-opus-4-8',
   endpointHint: '形如 https://你的中转站/v1/messages',
   betaHeader: 'context-management-2025-06-27,interleaved-thinking-2025-05-14',
+  longContextTiers: LONG_CONTEXT_TIERS,
   probes: [
     channel_id, identity, thinking_signature, message_id, protocol, consistency,
     structured_output, json_schema, tool_schema_stream, streaming_order, behavioral,

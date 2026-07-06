@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=28';
-import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=28';
-import { openaiProtocol } from './protocols/openai.js?v=28';
-import { geminiProtocol } from './protocols/gemini.js?v=28';
+import * as core from './core.js?v=29';
+import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=29';
+import { openaiProtocol } from './protocols/openai.js?v=29';
+import { geminiProtocol } from './protocols/gemini.js?v=29';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -16,8 +16,8 @@ const ISSUE_URL = REPO_URL + '/issues';
 
 // 每个探针的一句话说明（用于「检测项说明 / FAQ」区，按 id 取；缺省回退到探针 name）
 const PROBE_DESC = {
-  channel_id: '看响应 id 前缀判定渠道：Claude msg_01=官方/msg_bdrk_=Bedrock/msg_vrtx_=Vertex；OpenAI resp_=官方 Responses、chatcmpl-=疑似套 Chat 壳。若身份回复中自述 “Claude Code / Codex”，则进一步细分为对应工具渠道。',
-  identity: '问模型「你是谁/详细身份介绍」，核对自述身份是否与官方一致；暴露竞品身份（如 Claude 协议里自称 GPT、Gemini 里自称 OpenAI）=掺假；自述 Codex/Claude Code 则细分工具渠道。注：若响应 id 前缀已坐实官方渠道（如 Claude 的 msg_/msg_bdrk_/msg_vrtx_），竞品自述视为官方模型的身份幻觉（真模型也会偶发），记「不适用」而非掺假。',
+  channel_id: '看响应 id 前缀判定渠道：Claude msg_01=官方/msg_bdrk_=Bedrock/msg_vrtx_=Vertex；OpenAI resp_=官方 Responses、chatcmpl-=疑似套 Chat 壳。若身份回复中自述 “Claude Code / Codex / Kiro”，则进一步细分为对应工具渠道。',
+  identity: '问模型「你是谁/详细身份介绍」，核对自述身份是否与官方一致；暴露竞品身份（如 Claude 协议里自称 GPT、Gemini 里自称 OpenAI）=掺假；自述 Codex/Claude Code 则细分工具渠道；文本或思考内容中出现 “Kiro” 则细分为 Kiro (AWS) 渠道（Amazon 基于 Bedrock 封装的 Claude 客户端）。注：若响应 id 前缀已坐实官方渠道（如 Claude 的 msg_/msg_bdrk_/msg_vrtx_），竞品自述视为官方模型的身份幻觉（真模型也会偶发），记「不适用」而非掺假。',
   thinking_signature: '验证思考链的加密签名（无法伪造，最强证据）：真思考有长签名 + thinking_tokens>0。',
   message_id: '检查 message id 是否符合官方规范格式。',
   protocol: '校验响应结构是否符合官方 schema（Claude usage 含 cache_creation/service_tier；OpenAI Responses 含 output/usage.input_tokens；Gemini 含 candidates/usageMetadata），并扫描套壳污染字段。',

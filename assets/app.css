@@ -350,6 +350,7 @@ details.adv summary:hover { color: var(--ink); }
 .badge.anthropic { background: rgba(217,119,87,.12); color: var(--claude); border-color: var(--claude); }
 .badge.claudecode { background: rgba(217,119,87,.12); color: var(--claude); border-color: var(--claude); border-left: 3px solid var(--claude); font-weight: 700; }
 .badge.bedrock   { background: rgba(66,133,244,.12); color: var(--gemini); border-color: var(--gemini); }
+.badge.kiro { background: rgba(66,133,244,.12); color: var(--gemini); border-color: var(--gemini); border-left: 3px solid var(--gemini); font-weight: 700; }
 .badge.vertex    { background: rgba(16,163,127,.12); color: var(--codex);  border-color: var(--codex); }
 .badge.openai_shape, .badge.foreign { background: rgba(192,57,43,.10); color: var(--crit); border-color: var(--crit); }
 .badge.azure { background: rgba(0,120,212,.12); color: #0078d4; border-color: #0078d4; border-left: 3px solid #0078d4; font-weight: 700; }

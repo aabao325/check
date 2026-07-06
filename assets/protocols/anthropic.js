@@ -12,7 +12,7 @@
  *
  * 思路全部吸收自 veridrop 的 anthropic detectors（权重、阈值对齐）。
  * ===================================================================== */
-import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=28';
+import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=29';
 
 // 多模态魔法串（PDF 探针）。
 const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
@@ -103,6 +103,11 @@ function thinkingBlocks(json) {
   if (!json || !Array.isArray(json.content)) return [];
   return json.content.filter((c) => c.type === 'thinking' || c.type === 'redacted_thinking');
 }
+/* 文本 + 思考内容合并（小写），供身份自述关键词扫描（如 "kiro"）覆盖两种内容块 */
+function textAndThinkingOf(json) {
+  const thinkingText = thinkingBlocks(json).map((b) => b.thinking || '').join('\n');
+  return `${textOf(json)}\n${thinkingText}`.toLowerCase();
+}
 function toolUseBlocks(json) {
   if (!json || !Array.isArray(json.content)) return [];
   return json.content.filter((c) => c.type === 'tool_use');
@@ -158,10 +163,12 @@ const identity = {
     // "claude code" 关键词：仅在 claude 紧邻 code（允许空格/连字符/下划线）时命中，
     // 避免 "claude … 帮你写 code" 这类误判。
     const hasClaudeCode = /claude[\s\-_]*code/.test(text);
+    // "kiro" 关键词：文本或思考内容任一出现即命中（Kiro 是 Amazon 基于 Bedrock 的 Claude 封装客户端）
+    const hasKiro = /\bkiro\b/.test(textAndThinkingOf(ctx.json));
     const rivals = RIVAL_WORDS.filter((w) => text.includes(w));
     const brands = BRAND_FINGERPRINTS.filter((w) => text.includes(w));
     features.push(`含 "claude": ${hasClaude ? '是' : '否'}`, `含 "anthropic": ${hasAnthropic ? '是' : '否'}`,
-      `含 "claude code": ${hasClaudeCode ? '是' : '否'}`);
+      `含 "claude code": ${hasClaudeCode ? '是' : '否'}`, `含 "kiro"(文本/思考): ${hasKiro ? '是' : '否'}`);
 
     const diffs = [];
     let score, severity = '';
@@ -202,6 +209,16 @@ const identity = {
       ctx.shared.channel.channel = 'Claude Code';
       ctx.shared.channel.code = 'claudecode';
       features.push('回复自述含 "claude code" → 渠道修正为 Claude Code（而非官方直连）');
+    }
+
+    // 渠道细分：文本或思考内容任一出现 "kiro" → 判为 Kiro(AWS) 渠道。
+    // Kiro 是 Amazon 基于 AWS Bedrock 封装的 Claude 客户端，真实流量的响应 id 前缀通常是
+    // msg_bdrk_（Bedrock）；也兼容极少数经直连转发的场景（msg_）。仅在 channel_id 已判定为
+    // 官方（anthropic/bedrock）时覆盖，套壳/存疑渠道不因关键词命中被误升级为「Kiro 官方」。
+    if (hasKiro && ctx.shared && ctx.shared.channel && (ctx.shared.channel.code === 'anthropic' || ctx.shared.channel.code === 'bedrock')) {
+      ctx.shared.channel.channel = 'Kiro (AWS)';
+      ctx.shared.channel.code = 'kiro';
+      features.push('回复内容（文本或思考）含 "kiro" → 渠道修正为 Kiro (AWS) 渠道');
     }
 
     return { features, diffs, score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity, status: 'done' };

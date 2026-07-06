@@ -2,7 +2,7 @@
  * report.js —— 分享报告查看页（只读）
  * 支持两种来源：?id=xxx（后端短链）/ #data=base64（静态分享）
  * ===================================================================== */
-import * as core from './core.js?v=28';
+import * as core from './core.js?v=29';
 
 const $ = (s) => document.querySelector(s);
 
@@ -240,6 +240,7 @@ function channelCode(ch) {
   if (ch.includes('中转软件') || ch.includes('中转')) return 'relay';
   if (ch.includes('Codex')) return 'claudecode';
   if (ch.includes('Claude Code')) return 'claudecode';
+  if (ch.includes('Kiro')) return 'kiro';
   if (ch.includes('Anthropic')) return 'anthropic';
   if (ch.includes('Bedrock')) return 'bedrock';
   if (ch.includes('Vertex')) return 'vertex';

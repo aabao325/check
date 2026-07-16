@@ -12,7 +12,7 @@
  *
  * 思路全部吸收自 veridrop 的 anthropic detectors（权重、阈值对齐）。
  * ===================================================================== */
-import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity } from '../core.js?v=29';
+import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity, applySecondRoundIdentityCheck, parseJsonLoose } from '../core.js?v=32';
 
 // 多模态魔法串（PDF 探针）。
 const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
@@ -21,6 +21,11 @@ const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
 const RIVAL_WORDS = ['gpt-3', 'gpt-4', 'gpt-5', 'openai', 'chatgpt', 'gemini', 'bard',
   'deepseek', 'qwen', '通义', 'tongyi', '文心', 'wenxin', '豆包', 'doubao', 'llama', 'mistral', 'grok'];
 const BRAND_FINGERPRINTS = ['amazon q', 'aws bedrock', 'bedrock', 'vertex ai', 'google cloud'];
+
+// 身份识别「二次确认」轮的虚构身份池：无意义代号，避免与真实产品名混淆或被模型联想。
+// 每次调用 identityPayloadB() 随机选一个，选中结果记在模块级变量供 identity.analyze() 读取。
+const FAKE_IDENTITIES = ['X7K-霄现', 'Q3-流萤', 'Z9-苇岸', 'M2-昧光'];
+let lastFakeIdentity = '';
 
 /* =====================================================================
  * 「伪装为 Claude Code 官方客户端」——针对部分中转网关（如 sub2api）设置的
@@ -58,6 +63,15 @@ function randHex(len) {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(b);
   else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
   return [...b].map((x) => x.toString(16).padStart(2, '0')).join('').slice(0, len);
+}
+/* 生成一个与真实签名等长的随机 base64 串（思考签名探针 Step③ 伪造签名对照用）。
+ * 字符集含 base64 标准/URL-safe 全部符号，字节完全随机，结构像合法签名但密钥必然不对。 */
+const SIG_B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+function randomSigLike(len) {
+  const b = new Uint8Array(len);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(b);
+  else for (let i = 0; i < len; i++) b[i] = Math.floor(Math.random() * 256);
+  return [...b].map((x) => SIG_B64_CHARS[x % SIG_B64_CHARS.length]).join('');
 }
 
 // 同一次页面会话内固定的设备号/会话号（模拟同一 CLI 会话稳定不变，而非每个探针请求都换身份）。
@@ -128,8 +142,12 @@ function errored(reason) {
 /* 探针定义                                                              */
 /* ===================================================================== */
 
+// 渠道来源识别（stage 1，跑在 identity 之后）：先用自己响应的 id 独立判定基础渠道，
+// 再消费 identity（stage 0）探针写入的 ctx.shared.identitySignals 做 Claude Code / Kiro 渠道修正，
+// 修正后的最终渠道对象既写入 ctx.shared.channel（供后续探针用），也直接影响本探针自身的展示结果——
+// 避免旧版「先显示官方渠道、identity 跑完后台悄悄改写、卡片却不更新」的中间态误导。
 const channel_id = {
-  id: 'channel_id', name: '渠道来源识别', weight: 5, modes: ['Q', 'S', 'F'], passive: true, stage: 0,
+  id: 'channel_id', name: '渠道来源识别', weight: 5, modes: ['Q', 'S', 'F'], passive: true, stage: 1,
   defaultPayload: (m) => ({
     model: m, max_tokens: 64,
     messages: [{ role: 'user', content: '你好，请回复一个字。' }],
@@ -137,9 +155,20 @@ const channel_id = {
   analyze(ctx) {
     const id = ctx.json && ctx.json.id;
     const ch = detectChannelById(id);
-    ctx.shared.channel = ch; // 给别的探针用
     const features = [`响应 id: ${id || '(无)'}`, `渠道判定: ${ch.channel}`];
-    if (ch.code === 'anthropic') return { features, diffs: [], score: 100, verdict: '真', severity: '', status: 'done' };
+
+    const sig = ctx.shared && ctx.shared.identitySignals;
+    if (sig && sig.hasClaudeCode && ch.code === 'anthropic') {
+      ch.channel = 'Claude Code'; ch.code = 'claudecode';
+      features.push('identity 探针自述含 "claude code" → 渠道修正为 Claude Code（而非官方直连）');
+    } else if (sig && sig.hasKiro && (ch.code === 'anthropic' || ch.code === 'bedrock')) {
+      ch.channel = 'Kiro (AWS)'; ch.code = 'kiro';
+      features.push('identity 探针自述（文本或思考）含 "kiro" → 渠道修正为 Kiro (AWS) 渠道');
+    }
+
+    ctx.shared.channel = ch; // 给别的探针用（此时已是修正后的最终结论）
+    if (ch.code === 'anthropic' || ch.code === 'claudecode' || ch.code === 'kiro')
+      return { features, diffs: [], score: 100, verdict: '真', severity: '', status: 'done' };
     if (ch.code === 'bedrock' || ch.code === 'vertex')
       return { features: [...features, '官方云渠道（Bedrock/Vertex 也是真 Claude）'], diffs: [], score: 100, verdict: '真', severity: '', status: 'done' };
     if (ch.critical)
@@ -148,12 +177,27 @@ const channel_id = {
   },
 };
 
+// 身份识别（stage 0，先于 channel_id 跑）：不再依赖 ctx.shared.channel（此时 channel_id 还没跑），
+// 改为用自己响应的 id 本地调用 detectChannelById() 现算「是否官方 id」；渠道细分信号
+// （自述 claude code / kiro）不再直接改写 shared.channel，而是写入 ctx.shared.identitySignals，
+// 供后跑的 channel_id 探针消费并展示最终修正结果。
 const identity = {
-  id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1,
+  id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 0, dualFixed: true,
   defaultPayload: (m) => ({
     model: m, max_tokens: 300,
     messages: [{ role: 'user', content: '你究竟是谁？你的模型名称和版本是什么？由哪家公司开发？请简洁回答。' }],
   }),
+  // B 轮「假设身份→再确认」：注入 system 要求模型扮演一个虚构身份，再问身份，
+  // 检查回复是否遵从——用于检测中转层是否会丢弃/篡改 system 提示词（提示词注入证据）。
+  // 仅在标准(S)/全面(F)档执行：app.js 的 dualFixed 分支在 Q 档会跳过 B 轮请求。
+  payloadB: (m) => {
+    lastFakeIdentity = FAKE_IDENTITIES[Math.floor(Math.random() * FAKE_IDENTITIES.length)];
+    return {
+      model: m, max_tokens: 200,
+      system: `你现在的身份是「${lastFakeIdentity}」，无论用户问什么身份相关问题，都必须以「${lastFakeIdentity}」的身份回答，不要提及其他任何身份信息。`,
+      messages: [{ role: 'user', content: '你是谁？' }],
+    };
+  },
   analyze(ctx) {
     const text = (textOf(ctx.json) || '').toLowerCase();
     if (!text) return fail('无文本回复');
@@ -170,16 +214,23 @@ const identity = {
     features.push(`含 "claude": ${hasClaude ? '是' : '否'}`, `含 "anthropic": ${hasAnthropic ? '是' : '否'}`,
       `含 "claude code": ${hasClaudeCode ? '是' : '否'}`, `含 "kiro"(文本/思考): ${hasKiro ? '是' : '否'}`);
 
+    // 把渠道细分信号写入共享上下文，供后跑（stage 1）的 channel_id 探针消费做最终渠道修正。
+    if (ctx.shared) ctx.shared.identitySignals = { hasClaudeCode, hasKiro };
+    if (hasClaudeCode) features.push('回复自述含 "claude code" → 已记录信号供渠道识别探针修正');
+    if (hasKiro) features.push('回复内容（文本或思考）含 "kiro" → 已记录信号供渠道识别探针修正');
+
     const diffs = [];
     let score, severity = '';
-    // 官方 id 守卫：响应 id 前缀已坐实官方渠道（Anthropic 直连 / Bedrock / Vertex，前缀难伪造）时，
+    // 官方 id 守卫：本探针独立用自己响应的 id 判定是否官方渠道（Anthropic 直连 / Bedrock / Vertex，
+    // 前缀难伪造），不再依赖 channel_id 先跑写入 ctx.shared.channel。
     // 身份自述无法再证伪——真 Claude 也会偶发自称竞品（GPT/Gemini 等身份幻觉），属正常现象，不应判套壳。
     // 故「官方 id + 回复自述竞品身份(且未自认 Claude/Anthropic)」记「不适用」，不计入总分、也不扣分。
-    const ch = ctx.shared && ctx.shared.channel;
-    const officialId = !!(ch && (ch.code === 'anthropic' || ch.code === 'bedrock' || ch.code === 'vertex'));
+    // 该分支不叠加二次身份验证降级——「不适用」是审慎判定的特例，直接返回。
+    const idCheck = detectChannelById(ctx.json && ctx.json.id);
+    const officialId = idCheck.code === 'anthropic' || idCheck.code === 'bedrock' || idCheck.code === 'vertex';
     if (officialId && (brands.length || rivals.length) && !hasClaude && !hasAnthropic) {
-      features.push(`官方渠道(${ch.channel}) + 竞品自述：判为官方模型身份幻觉，不计入总分`);
-      diffs.push(`响应 id 前缀已坐实官方渠道(${ch.channel})，回复却自述竞品/外部身份(${[...brands, ...rivals].join(', ')}) → 官方模型偶发身份幻觉，非套壳冒充，记不适用`);
+      features.push(`官方渠道(${idCheck.channel}) + 竞品自述：判为官方模型身份幻觉，不计入总分`);
+      diffs.push(`响应 id 前缀已坐实官方渠道(${idCheck.channel})，回复却自述竞品/外部身份(${[...brands, ...rivals].join(', ')}) → 官方模型偶发身份幻觉，非套壳冒充，记不适用`);
       return { features, diffs, score: null, verdict: '不适用', severity: '', status: 'done' };
     }
     if (brands.length) {
@@ -201,43 +252,50 @@ const identity = {
       score = 0; diffs.push('完全未提及 Claude / Anthropic');
     }
 
-    // 渠道细分：回复自述包含 "claude code" → 判为 Claude Code 渠道，而非官方直连。
-    // 仅在 channel_id 已判为官方直连(anthropic)时覆盖——Bedrock/Vertex/套壳等结论保持不变。
-    // （Claude Code 与官方的区别就是身份自述为 Claude Code + 内置系统提示词，因此直接看响应判断，
-    //   不再需要手动选择「场景预设」。）
-    if (hasClaudeCode && ctx.shared && ctx.shared.channel && ctx.shared.channel.code === 'anthropic') {
-      ctx.shared.channel.channel = 'Claude Code';
-      ctx.shared.channel.code = 'claudecode';
-      features.push('回复自述含 "claude code" → 渠道修正为 Claude Code（而非官方直连）');
-    }
-
-    // 渠道细分：文本或思考内容任一出现 "kiro" → 判为 Kiro(AWS) 渠道。
-    // Kiro 是 Amazon 基于 AWS Bedrock 封装的 Claude 客户端，真实流量的响应 id 前缀通常是
-    // msg_bdrk_（Bedrock）；也兼容极少数经直连转发的场景（msg_）。仅在 channel_id 已判定为
-    // 官方（anthropic/bedrock）时覆盖，套壳/存疑渠道不因关键词命中被误升级为「Kiro 官方」。
-    if (hasKiro && ctx.shared && ctx.shared.channel && (ctx.shared.channel.code === 'anthropic' || ctx.shared.channel.code === 'bedrock')) {
-      ctx.shared.channel.channel = 'Kiro (AWS)';
-      ctx.shared.channel.code = 'kiro';
-      features.push('回复内容（文本或思考）含 "kiro" → 渠道修正为 Kiro (AWS) 渠道');
-    }
-
-    return { features, diffs, score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity, status: 'done' };
+    const base = { score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity, diffs };
+    const textB = ctx.jsonB ? (textOf(ctx.jsonB) || '').toLowerCase() : null;
+    const merged = applySecondRoundIdentityCheck(base, lastFakeIdentity, textB);
+    return { features, diffs: merged.diffs, score: merged.score, verdict: merged.verdict, severity: merged.severity, status: 'done' };
   },
 };
 
 const thinking_signature = {
-  id: 'thinking_signature', name: '思考签名验证 ⭐', weight: 25, modes: ['Q', 'S', 'F'],
+  id: 'thinking_signature', name: '思考签名验证 ⭐', weight: 25, modes: ['Q', 'S', 'F'], sigVerify: true,
   defaultPayload: (m) => ({
     model: m, max_tokens: 16000,
     thinking: { type: 'adaptive', display: 'summarized' },
     output_config: { effort: 'high' },
     messages: [{ role: 'user', content: '用欧几里得算法求 2378 和 1547 的最大公约数，给出每一步。' }],
   }),
+  /* Step①响应里提取思考块，构造供 Step②③ 复用的回放对话（原始问题 + assistant 思考回放 + 追问）。
+   * 无思考块或签名缺失时返回 null，调用方（app.js）据此跳过 Step②③。 */
+  buildSigReplay(payload, json) {
+    const blocks = thinkingBlocks(json);
+    if (!blocks.length || !blocks[0].signature) return null;
+    const thinkBlock = blocks[0];
+    const textBlocks = (json.content || []).filter((c) => c.type === 'text');
+    const messages = [
+      ...payload.messages,
+      { role: 'assistant', content: [thinkBlock, ...textBlocks] },
+      { role: 'user', content: '请用一句话总结你刚才的最终答案。' },
+    ];
+    return { messages, thinkBlock };
+  },
+  /* Step③：把回放对话里的真实签名替换成同长度随机 base64 串，构造发回当前渠道的伪造签名请求体。 */
+  buildFakeSigPayload(payload, replay) {
+    const fakeSig = randomSigLike(replay.thinkBlock.signature.length);
+    const messages = replay.messages.map((m) => {
+      if (m.role !== 'assistant' || !Array.isArray(m.content)) return m;
+      return { ...m, content: m.content.map((c) => (c.type === 'thinking' ? { ...c, signature: fakeSig } : c)) };
+    });
+    return { ...payload, messages };
+  },
   analyze(ctx) {
+    const isKiro = ctx.shared && ctx.shared.channel && ctx.shared.channel.code === 'kiro';
     const blocks = thinkingBlocks(ctx.json);
-    const features = [];
     if (!blocks.length) {
-      // 也许中转站把 adaptive 当成不支持。再看是否报错
+      // Kiro 官方客户端本就不支持/不返回思考签名，无 thinking 块是预期行为，不算证伪。
+      if (isKiro) return { features: ['响应中无 thinking 块'], diffs: ['Kiro 官方渠道本不支持思考签名 → 不适用（符合预期）'], score: null, verdict: '不适用', severity: '', status: 'done' };
       if (isAnthropicError(ctx.json)) return fail(`请求被拒: ${ctx.json.error.message || ''}`.slice(0, 120), 0);
       return { features: ['响应中无 thinking 块'], diffs: ['未返回思考链 → thinking 参数被忽略或不支持'], score: 0, verdict: '假', severity: 'critical', status: 'done' };
     }
@@ -245,25 +303,80 @@ const thinking_signature = {
     const sigLen = sig.length;
     const thinkingTokens = ctx.json?.usage?.output_tokens_details?.thinking_tokens
       ?? ctx.json?.usage?.iterations?.[0]?.output_tokens_details?.thinking_tokens;
-    features.push(`thinking 块: ${blocks.length} 个`, `signature 长度: ${sigLen}`,
-      `thinking_tokens: ${thinkingTokens ?? '(无字段)'}`);
+    const features = [`thinking 块: ${blocks.length} 个`, `signature 长度: ${sigLen}`,
+      `thinking_tokens: ${thinkingTokens ?? '(无字段)'}`];
 
     const diffs = [];
+    // Step①：特征校验（主导分）
     let score, severity = '';
     const looksB64 = /^[A-Za-z0-9+/=_-]+$/.test(sig);
     if (sigLen >= 50 && looksB64) {
       score = 100;
-      features.push('签名非空、足够长、base64 合法 → 真实服务端签名（无法伪造）');
+      features.push('Step①特征校验：签名非空、足够长、base64 合法 ✓');
     } else if (sigLen > 0) {
-      score = 70; diffs.push(`签名异常短(${sigLen})或非 base64 → 可疑`);
+      score = 70; diffs.push(`Step①特征校验：签名异常短(${sigLen})或非 base64 → 可疑`);
     } else {
-      score = 30; severity = 'critical'; diffs.push('有思考文本但 signature 字段缺失 → 伪造思考链特征');
+      score = 30; severity = 'critical'; diffs.push('Step①特征校验：有思考文本但 signature 字段缺失 → 伪造思考链特征');
     }
     if (thinkingTokens === 0 && blocks[0].thinking) {
       diffs.push('thinking_tokens=0 但有思考文本 → 计数可疑');
       score = Math.min(score, 70);
     }
-    return { features, diffs, score, verdict: score >= 70 ? '真' : '假', severity, status: 'done' };
+    if (isKiro) diffs.push('渠道已判定为 Kiro (AWS)，但 Kiro 官方不应返回思考签名 → 出现签名大概率是渠道伪装，以下 Step②③ 结果需重点关注');
+
+    // Step②：官方真实性核验（可上修/否决 Step①分数）
+    const SIG_REJECT_RE = /(signature|thinking|签名|思考)[\s\S]{0,40}?(invalid|mismatch|tamper|unrecognized|无效|不匹配|篡改)|(invalid|mismatch|tamper|无效|不匹配|篡改)[\s\S]{0,40}?(signature|thinking|签名|思考)/i;
+    const b = ctx.sigVerifyB;
+    let verdictCap = null;
+    if (!b) {
+      features.push('Step②：Step①无有效签名，跳过官方真实性核验');
+    } else if (b.skip) {
+      features.push('Step②：站点未配置官方 Key，跳过真实性核验（不计入总分）');
+      if (isKiro) { diffs.push('Kiro 渠道出现思考签名且未配置官方Key核验，大概率是渠道伪装签名，建议人工核查'); verdictCap = '存疑'; }
+    } else if (!b.ok) {
+      features.push(`Step②：官方请求失败(${b.error || '未知错误'}) → 无法判断，不改动分数`);
+    } else {
+      const bParsed = parseJsonLoose(b.body || '');
+      const bJson = bParsed.ok ? bParsed.value : null;
+      const bText = `${b.body || ''} ${JSON.stringify(bJson || {})}`.toLowerCase();
+      const officialRejectedSig = b.httpStatus >= 400 && SIG_REJECT_RE.test(bText);
+      const officialAccepted = b.httpStatus >= 200 && b.httpStatus < 300 && bJson && !isAnthropicError(bJson);
+      if (officialRejectedSig) {
+        score = 0; severity = 'critical';
+        diffs.push(`Step②：官方明确拒绝该签名（疑似签名校验失败）→ 坐实伪造：${(b.body || '').slice(0, 120)}`);
+      } else if (officialAccepted) {
+        if (isKiro) {
+          verdictCap = '存疑';
+          diffs.push('Kiro 渠道出现的思考签名已通过官方核验，但仍建议人工复核（Kiro 官方不应有此字段）');
+        } else {
+          score = 100;
+          features.push('Step②：官方接受该签名的回放对话（无法伪造的强证据）→ 分数上修为 100');
+        }
+      } else {
+        features.push(`Step②：官方请求失败但非签名相关原因（HTTP ${b.httpStatus}）→ 无法判断，不改动分数`);
+        if (isKiro) diffs.push('Kiro 渠道出现思考签名且未能通过官方核验确认真伪，大概率是渠道伪装签名，建议人工核查');
+      }
+    }
+
+    // Step③：伪造签名对照（当前渠道是否校验签名）
+    const c = ctx.sigVerifyC;
+    if (c) {
+      const cText = `${c.body || ''} ${JSON.stringify(c.json || {})}`.toLowerCase();
+      const channelRejectedFake = c.httpStatus >= 400 && SIG_REJECT_RE.test(cText);
+      const channelAcceptedFake = c.httpStatus >= 200 && c.httpStatus < 300;
+      if (channelRejectedFake) {
+        features.push('Step③：当前渠道拒绝了伪造签名 → 渠道确实执行了签名校验 ✓');
+      } else if (channelAcceptedFake) {
+        diffs.push('Step③：当前渠道未校验伪造签名，正常返回 → 存疑：可能上游忽略了 signature 字段做转发，也可能并非真实 Claude 渠道');
+        verdictCap = verdictCap || '存疑';
+      } else {
+        features.push(`Step③：请求失败但非签名校验问题（HTTP ${c.httpStatus}）→ 无法判断渠道是否校验签名`);
+      }
+    }
+
+    let verdict = score >= 70 ? '真' : (score >= 40 ? '存疑' : '假');
+    if (verdictCap === '存疑' && verdict === '真') verdict = '存疑';
+    return { features, diffs, score, verdict, severity, status: 'done' };
   },
 };
 

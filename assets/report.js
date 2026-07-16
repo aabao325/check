@@ -2,7 +2,7 @@
  * report.js —— 分享报告查看页（只读）
  * 支持两种来源：?id=xxx（后端短链）/ #data=base64（静态分享）
  * ===================================================================== */
-import * as core from './core.js?v=29';
+import * as core from './core.js?v=32';
 
 const $ = (s) => document.querySelector(s);
 
@@ -151,11 +151,13 @@ async function buildQrBlock(report, brand) {
 /* 把一个结果分到「问题 / 正常」两类，并给出排序权重（数字越大越严重、越靠前）。 */
 function tierOf(r) {
   if (r.severity === 'critical') return { bad: true, rank: 4, cls: 'crit' };
+  if (r.severity === 'warn') return { bad: true, rank: 3, cls: 'warn' };
   if (r.status === 'error') return { bad: true, rank: 3, cls: 'warn' };
   const s = r.score;
   if (s == null || r.status === 'skip') return { bad: false, rank: 0, cls: 'skip' }; // 跳过/不适用按正常归类
   if (s < 40) return { bad: true, rank: 3, cls: 'fail' };
   if (s < 70) return { bad: true, rank: 2, cls: 'warn' };
+  if (s < 100) return { bad: false, rank: 0, attention: true, cls: 'attn' }; // 良好但未满分：单独提醒
   return { bad: false, rank: 1, cls: 'pass' };
 }
 
@@ -165,18 +167,31 @@ function renderResults(results) {
 
   const tagged = results.map((r) => ({ r, t: tierOf(r) }));
   const bad = tagged.filter((x) => x.t.bad).sort((a, b) => b.t.rank - a.t.rank);
-  const good = tagged.filter((x) => !x.t.bad);
+  const attention = tagged.filter((x) => !x.t.bad && x.t.attention);
+  const good = tagged.filter((x) => !x.t.bad && !x.t.attention);
 
-  // 顶部状态条：一眼看到「几个问题 / 几个正常」
+  // 顶部状态条：一眼看到「几个问题 / 几个待优化 / 几个正常」
   const bar = document.createElement('div');
   bar.className = 'report-statbar';
+  const attnSpan = attention.length ? `<span class="sb-attn">🔸 ${attention.length} 项待优化</span>` : '';
   bar.innerHTML = bad.length
-    ? `<span class="sb-bad">⚠️ ${bad.length} 项需关注</span><span class="sb-ok">✅ ${good.length} 项正常</span>`
-    : `<span class="sb-allok">✅ 全部 ${good.length} 项检测正常，未发现异常</span>`;
+    ? `<span class="sb-bad">⚠️ ${bad.length} 项需关注</span>${attnSpan}<span class="sb-ok">✅ ${good.length} 项正常</span>`
+    : (attention.length
+        ? `${attnSpan}<span class="sb-ok">✅ ${good.length} 项满分</span>`
+        : `<span class="sb-allok">✅ 全部 ${good.length} 项检测正常，未发现异常</span>`);
   box.appendChild(bar);
 
   // 问题项：置顶、全展开（复用原卡片）
   for (const { r } of bad) box.appendChild(buildCard(r));
+
+  // 良好但未满分：折叠分组，排在满分/不适用分组之前，提醒用户关注
+  if (attention.length) {
+    const wrap = document.createElement('div');
+    wrap.className = 'card slim-group attn-group';
+    wrap.innerHTML = `<div class="slim-group-title">🔸 良好但未满分（${attention.length}）<span class="muted">未拿到满分，暂不算严重风险，建议留意</span></div>`;
+    for (const { r } of attention) wrap.appendChild(buildSlimRow(r));
+    box.appendChild(wrap);
+  }
 
   // 正常项：折叠区，逐条一行，点击才展开特征/差异
   if (good.length) {
@@ -252,9 +267,11 @@ function channelCode(ch) {
 function buildCard(r) {
   const card = document.createElement('div');
   const cls = r.severity === 'critical' ? 'crit'
+    : r.severity === 'warn' ? 'warn'
     : (r.score >= 70 ? 'pass' : r.score >= 40 ? 'warn' : (r.status === 'skip' ? 'skip' : 'fail'));
   card.className = 'card probe-card ' + cls;
-  const badge = r.status === 'skip' ? '⏭ 跳过' : (r.score >= 70 ? `✅ ${r.score}` : r.score >= 40 ? `⚠ ${r.score}` : `❌ ${r.score}`);
+  const badge = r.severity === 'warn' ? `⚠ 存疑 ${r.score == null ? '不适用' : r.score}`
+    : r.status === 'skip' ? '⏭ 跳过' : (r.score >= 70 ? `✅ ${r.score}` : r.score >= 40 ? `⚠ ${r.score}` : `❌ ${r.score}`);
   card.innerHTML = `
     <div class="pc-head">
       <span class="name">${core.esc(r.name)}</span>

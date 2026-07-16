@@ -20,8 +20,10 @@ return [
     'GLM_MODEL' => 'glm-4-flash',             // 免费款；若智谱更新型号名，改这里
     'GLM_URL'   => 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
 
-    // ---- （可选）Anthropic 官方 count_tokens 的 key，用于精确核对中转站上报的 input_tokens ----
-    // 没有就留空，token 探针会跳过这一项精确核对。
+    // ---- （可选）Anthropic 官方直连 key，用于：
+    //   ① count_tokens 精确核对中转站上报的 input_tokens
+    //   ② 思考签名三步验证的「真实性核验」——把思考块回放给官方判断签名是否真实签发
+    // 没有就留空，对应探针会跳过这部分核验（不计分不扣分）。
     'OFFICIAL_COUNT_KEY' => '',               // 形如 sk-ant2-xxx
     'OFFICIAL_BASE_URL'  => 'https://api.anthropic.com',
 

@@ -7,7 +7,7 @@
  * 思考参数代际：2.5 系用 thinkingBudget、3 系用 thinkingLevel；错代参数对 2.5 会被官方拒绝，
  * 对 3 系则向后兼容静默接受（验不了真）。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=29';
+import { coefficientOfVariation, applySecondRoundIdentityCheck } from '../core.js?v=32';
 
 /* ---------- 小工具 ---------- */
 // 取最终文本：candidates[0].content.parts[].text 拼接；防 SAFETY 拦截时 parts undefined。
@@ -37,12 +37,27 @@ function isLegacyGen(model) {
 const RIVAL_WORDS = ['openai', 'chatgpt', 'gpt-3', 'gpt-4', 'gpt-5', 'claude', 'anthropic',
   'deepseek', 'qwen', '通义', 'tongyi', '文心', 'wenxin', '豆包', 'doubao', 'llama', 'mistral', 'grok'];
 
+// 身份识别「二次确认」轮的虚构身份池：无意义代号，避免与真实产品名混淆或被模型联想。
+const FAKE_IDENTITIES = ['X7K-霄现', 'Q3-流萤', 'Z9-苇岸', 'M2-昧光'];
+let lastFakeIdentity = '';
+
 const identity = {
-  id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1,
+  id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1, dualFixed: true,
   defaultPayload: () => ({
     contents: [{ parts: [{ text: '请做你的详细身份介绍：你是谁？模型名称与版本？由哪家公司训练和开发？请简洁如实回答。' }] }],
     generationConfig: { maxOutputTokens: 2000 },
   }),
+  // B 轮「假设身份→再确认」：用 systemInstruction 字段承载系统级指令，要求模型扮演虚构身份，
+  // 再问身份，检查是否遵从——用于检测 systemInstruction 是否被中转层丢弃/篡改。
+  // 仅在标准(S)/全面(F)档执行：app.js 的 dualFixed 分支在 Q 档会跳过 B 轮请求。
+  payloadB: () => {
+    lastFakeIdentity = FAKE_IDENTITIES[Math.floor(Math.random() * FAKE_IDENTITIES.length)];
+    return {
+      systemInstruction: { parts: [{ text: `你现在的身份是「${lastFakeIdentity}」，无论用户问什么身份相关问题，都必须以「${lastFakeIdentity}」的身份回答，不要提及其他任何身份信息。` }] },
+      contents: [{ parts: [{ text: '你是谁？' }] }],
+      generationConfig: { maxOutputTokens: 1000 },
+    };
+  },
   analyze(ctx) {
     const text = (geminiText(ctx.json) || '').toLowerCase();
     if (!text) {
@@ -73,7 +88,11 @@ const identity = {
     } else {
       score = 0; diffs.push('完全未提及 Gemini / Google');
     }
-    return { features, diffs, score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity, status: 'done' };
+
+    const base = { score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity, diffs };
+    const textB = ctx.jsonB ? (geminiText(ctx.jsonB) || '').toLowerCase() : null;
+    const merged = applySecondRoundIdentityCheck(base, lastFakeIdentity, textB);
+    return { features, diffs: merged.diffs, score: merged.score, verdict: merged.verdict, severity: merged.severity, status: 'done' };
   },
 };
 

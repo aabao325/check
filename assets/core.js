@@ -85,6 +85,26 @@ export async function pingBackend() {
   }
 }
 
+/* ---------- 思考签名真实性核验：走 sig_verify.php ----------
+ * 把回放对话（含原始思考块+签名）转发给官方 Anthropic，用服务器配置的 OFFICIAL_COUNT_KEY 鉴权。
+ * 未配置时后端返回 {ok:false, skip:true}，调用方据此跳过这一步（不计分不扣分）。
+ * @param {object} payload { model, maxTokens?, thinking?, messages }
+ * @param {string} [betaHeader]
+ * @returns {Promise<{ok, httpStatus?, body?, error?, skip?}>}
+ */
+export async function officialSigVerify(payload, betaHeader) {
+  try {
+    const res = await fetch(`${PROXY.base}/sig_verify.php`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, betaHeader }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
 /* ---------- 回链探测（末端上游 IP/ASN/org）：走 trace.php ----------
  * traceStart：后端生成 sid + 本站公网回链 URL，替换 payload 里的 __TRACE_IMG_URL__ 占位符后
  *             转发视觉请求到目标；返回 {ok, sid, imgUrl, httpStatus, body}。
@@ -188,8 +208,8 @@ export function detectChannelById(id) {
   if (id.startsWith('msg_bdrk_')) return { channel: 'AWS Bedrock', code: 'bedrock', critical: false };
   if (id.startsWith('msg_vrtx_')) return { channel: 'Google Vertex', code: 'vertex', critical: false };
   if (id.startsWith('msg_')) return { channel: 'Anthropic 直连', code: 'anthropic', critical: false };
-  if (id.startsWith('chatcmpl-')) return { channel: 'OpenAI 兼容端(疑套壳)', code: 'openai_shape', critical: true };
-  return { channel: '非官方格式(疑套壳)', code: 'foreign', critical: true };
+  if (id.startsWith('chatcmpl-')) return { channel: 'OpenAI 兼容端(疑第三方套壳)', code: 'openai_shape', critical: true };
+  return { channel: '非官方格式(疑第三方套壳)', code: 'foreign', critical: true };
 }
 
 /* ---------- 轻量 JSON Schema 校验（够用：type/required/additionalProperties/嵌套） ---------- */
@@ -261,6 +281,7 @@ export function scoreTotal(results) {
 export function verdictBadge(r) {
   if (r.status === 'skip') return { text: '⏭ 跳过', cls: 'skip' };
   if (r.status === 'error') return { text: '⚠ 出错', cls: 'warn' };
+  if (r.severity === 'warn') return { text: `⚠ 存疑 ${r.score == null ? '不适用' : r.score}`, cls: 'warn' };
   if (r.verdict === '不适用') return { text: '➖ 不适用', cls: 'na' };
   if (r.verdict === '真' || r.score >= 70) return { text: `✅ 真 ${r.score}`, cls: 'pass' };
   if (r.verdict === '存疑' || r.score >= 40) return { text: `⚠ 存疑 ${r.score}`, cls: 'warn' };
@@ -386,4 +407,27 @@ export function coefficientOfVariation(nums) {
   if (mean === 0) return 0;
   const variance = arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
   return Math.sqrt(variance) / mean;
+}
+
+/* ---------- 身份识别「二次确认」判定：假设虚构身份→再问身份，检查是否遵从 ---------- */
+/**
+ * @param {{score:(number|null), verdict:string, severity:string, diffs:string[]}} base  A 轮已算出的判定结果
+ * @param {string} fakeName  B 轮 payload 里随机选中的虚构身份名
+ * @param {(string|null)} replyTextB  B 轮响应文本（已小写化）；未发送 B 轮传 null
+ * @returns {{score:(number|null), verdict:string, severity:string, diffs:string[]}}
+ */
+export function applySecondRoundIdentityCheck(base, fakeName, replyTextB) {
+  if (replyTextB == null) return base;
+  const diffs = [...(base.diffs || [])];
+  const followed = replyTextB.includes(fakeName.toLowerCase());
+  if (followed) {
+    diffs.push('身份扮演验证轮：已正确遵从注入的虚构身份设定 ✓ → system/instructions 未被中转层篡改');
+    return { ...base, diffs };
+  }
+  if (base.severity === 'critical') {
+    diffs.push('身份扮演验证轮：未遵从注入的虚构身份设定（不进一步降级，因已判定为冒充）');
+    return { ...base, diffs };
+  }
+  diffs.push(`身份扮演验证轮：未遵从注入的虚构身份设定「${fakeName}」→ 疑似 system/instructions 提示词被中转层丢弃或篡改（也可能是模型拒绝角色扮演，非决定性证据，建议结合其他探针交叉判断）`);
+  return { score: base.score, verdict: '存疑', severity: 'warn', diffs };
 }

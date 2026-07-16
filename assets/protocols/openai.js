@@ -6,8 +6,8 @@
  * 探针顺序：渠道识别(0)→身份识别(1)→…→参数检测(2)，身份判定的渠道（如 Codex CLI）
  * 写入 ctx.shared.channel 供 param_check 读取。
  * ===================================================================== */
-import { coefficientOfVariation } from '../core.js?v=29';
-import { scanAzureContentFilter, scanResponseHeaders, decideConclusion } from './openai_signals.js?v=29';
+import { coefficientOfVariation, applySecondRoundIdentityCheck } from '../core.js?v=32';
+import { scanAzureContentFilter, scanResponseHeaders, decideConclusion } from './openai_signals.js?v=32';
 
 // 回链探测：请求体里图片 URL 的哨兵占位符。后端 trace.php?action=start 会把它替换成
 // 本站公网可达的回链地址——这样「前端构造并展示请求体」的约定不变，真实 URL 由后端注入。
@@ -83,9 +83,9 @@ const channel_id = {
       ch = { channel: 'OpenAI 官方(Responses)', code: 'openai', critical: false };
       features.push('id 前缀 resp_ → 官方 Responses 端 ✓');
     } else if (typeof id === 'string' && id.startsWith('chatcmpl-')) {
-      ch = { channel: 'Chat 兼容端(疑套壳)', code: 'chat_shape', critical: true };
+      ch = { channel: 'Chat 兼容端(疑第三方套壳)', code: 'chat_shape', critical: true };
     } else {
-      ch = { channel: '非官方格式(疑套壳)', code: 'foreign', critical: true };
+      ch = { channel: '非官方格式(疑第三方套壳)', code: 'foreign', critical: true };
     }
     ctx.shared.channel = ch; // 给别的探针用（identity 可覆盖为 codex）
     if (ch.code === 'openai') return { features, diffs: [], score: 100, verdict: '真', severity: '', status: 'done' };
@@ -97,14 +97,29 @@ const channel_id = {
 const RIVAL_WORDS = ['claude', 'anthropic', 'gemini', 'bard', 'deepseek', 'qwen', '通义', 'tongyi',
   '文心', 'wenxin', '豆包', 'doubao', 'llama', 'mistral', 'grok'];
 
+// 身份识别「二次确认」轮的虚构身份池：无意义代号，避免与真实产品名混淆或被模型联想。
+const FAKE_IDENTITIES = ['X7K-霄现', 'Q3-流萤', 'Z9-苇岸', 'M2-昧光'];
+let lastFakeIdentity = '';
+
 const identity = {
-  id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1,
+  id: 'identity', name: '身份识别', weight: 5, modes: ['Q', 'S', 'F'], stage: 1, dualFixed: true,
   defaultPayload: (m) => ({
     model: m, max_output_tokens: 2048,
     // 中性提问：不主动提及 Codex/任何渠道，避免把关键词喂给模型后又拿它来判定（自我污染）。
     // 预算给足 2048：推理模型(如 gpt-5-nano)会先花大量 token 思考，预算太小会只产 reasoning 无文本。
     input: [{ role: 'user', content: '你究竟是谁？你的模型名称和版本是什么？由哪家公司开发？请简洁回答。' }],
   }),
+  // B 轮「假设身份→再确认」：Responses API 用顶层 instructions 字段承载系统级指令，
+  // 要求模型扮演虚构身份，再问身份，检查是否遵从——用于检测 instructions 是否被中转层丢弃/篡改。
+  // 仅在标准(S)/全面(F)档执行：app.js 的 dualFixed 分支在 Q 档会跳过 B 轮请求。
+  payloadB: (m) => {
+    lastFakeIdentity = FAKE_IDENTITIES[Math.floor(Math.random() * FAKE_IDENTITIES.length)];
+    return {
+      model: m, max_output_tokens: 1024,
+      instructions: `你现在的身份是「${lastFakeIdentity}」，无论用户问什么身份相关问题，都必须以「${lastFakeIdentity}」的身份回答，不要提及其他任何身份信息。`,
+      input: [{ role: 'user', content: '你是谁？' }],
+    };
+  },
   analyze(ctx) {
     const text = (outputText(ctx.json) || '').toLowerCase();
     if (!text || text.startsWith('[refusal]')) {
@@ -152,7 +167,10 @@ const identity = {
       features.push('回复自述含 "codex" → 渠道修正为 Codex CLI（而非官方直连）');
     }
 
-    return { features, diffs, score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity, status: 'done' };
+    const base = { score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity, diffs };
+    const textB = ctx.jsonB ? (outputText(ctx.jsonB) || '').toLowerCase() : null;
+    const merged = applySecondRoundIdentityCheck(base, lastFakeIdentity, textB);
+    return { features, diffs: merged.diffs, score: merged.score, verdict: merged.verdict, severity: merged.severity, status: 'done' };
   },
 };
 

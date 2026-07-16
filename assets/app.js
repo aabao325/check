@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=29';
-import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=29';
-import { openaiProtocol } from './protocols/openai.js?v=29';
-import { geminiProtocol } from './protocols/gemini.js?v=29';
+import * as core from './core.js?v=32';
+import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=32';
+import { openaiProtocol } from './protocols/openai.js?v=32';
+import { geminiProtocol } from './protocols/gemini.js?v=32';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -16,9 +16,9 @@ const ISSUE_URL = REPO_URL + '/issues';
 
 // 每个探针的一句话说明（用于「检测项说明 / FAQ」区，按 id 取；缺省回退到探针 name）
 const PROBE_DESC = {
-  channel_id: '看响应 id 前缀判定渠道：Claude msg_01=官方/msg_bdrk_=Bedrock/msg_vrtx_=Vertex；OpenAI resp_=官方 Responses、chatcmpl-=疑似套 Chat 壳。若身份回复中自述 “Claude Code / Codex / Kiro”，则进一步细分为对应工具渠道。',
-  identity: '问模型「你是谁/详细身份介绍」，核对自述身份是否与官方一致；暴露竞品身份（如 Claude 协议里自称 GPT、Gemini 里自称 OpenAI）=掺假；自述 Codex/Claude Code 则细分工具渠道；文本或思考内容中出现 “Kiro” 则细分为 Kiro (AWS) 渠道（Amazon 基于 Bedrock 封装的 Claude 客户端）。注：若响应 id 前缀已坐实官方渠道（如 Claude 的 msg_/msg_bdrk_/msg_vrtx_），竞品自述视为官方模型的身份幻觉（真模型也会偶发），记「不适用」而非掺假。',
-  thinking_signature: '验证思考链的加密签名（无法伪造，最强证据）：真思考有长签名 + thinking_tokens>0。',
+  channel_id: '看响应 id 前缀判定渠道：Claude msg_01=官方/msg_bdrk_=Bedrock/msg_vrtx_=Vertex；OpenAI resp_=官方 Responses、chatcmpl-=疑似套 Chat 壳。渠道来源识别探针会消费「身份识别」探针先跑得到的自述信号（Claude Code / Codex / Kiro），据此把最终渠道细分展示出来（不会先显示官方再悄悄改写）。',
+  identity: '问模型「你是谁/详细身份介绍」，核对自述身份是否与官方一致；暴露竞品身份（如 Claude 协议里自称 GPT、Gemini 里自称 OpenAI）=掺假；自述 Codex/Claude Code 则细分工具渠道；文本或思考内容中出现 “Kiro” 则细分为 Kiro (AWS) 渠道（Amazon 基于 Bedrock 封装的 Claude 客户端）。注：若响应 id 前缀已坐实官方渠道（如 Claude 的 msg_/msg_bdrk_/msg_vrtx_），竞品自述视为官方模型的身份幻觉（真模型也会偶发），记「不适用」而非掺假。标准/全面档额外加一轮「身份扮演验证」：注入 system/instructions 要求模型扮演一个随机虚构身份再次问身份，若模型未遵从，疑似中转层丢弃/篡改了 system 提示词，本项记「存疑」。本探针在渠道来源识别之前先跑，把渠道细分信号交给后者做最终展示，避免渠道徽标出现中间态。',
+  thinking_signature: '三步验证思考链签名：①特征校验——真签名足够长且 base64 合法（主导分）；②官方真实性核验——把①拿到的思考块回放给 Anthropic 官方，官方接受则坐实真实签发，官方明确拒绝则坐实伪造（需站点管理员配置官方 Key，未配置则跳过不计分）；③伪造签名对照——把签名换成同长度随机串发回当前渠道，若渠道未拦截则存疑（可能未做签名校验，也可能非真实 Claude）。Kiro 渠道特判：Kiro 官方不支持思考签名，无签名记不适用，若出现签名则视为高度可疑。',
   message_id: '检查 message id 是否符合官方规范格式。',
   protocol: '校验响应结构是否符合官方 schema（Claude usage 含 cache_creation/service_tier；OpenAI Responses 含 output/usage.input_tokens；Gemini 含 candidates/usageMetadata），并扫描套壳污染字段。',
   consistency: '同一请求多次发送，检查模型名稳定、输出方差合理（防随机换模型）。',
@@ -308,6 +308,7 @@ function navClsOf(result) {
   if (result.status === 'error') return 'warn';
   if (result.status === 'skip') return 'skip';
   if (result.severity === 'critical') return 'crit';
+  if (result.severity === 'warn') return 'warn';
   return core.verdictBadge(result).cls;
 }
 
@@ -493,6 +494,28 @@ async function executeProbe(probe, payload) {
     if (b) rounds.push({ label: 'B·对照句', body: b.raw.body, httpStatus: b.raw.httpStatus, id: b.json?.id });
     return { ...base, httpStatus: a.raw.httpStatus, headers: a.raw.headers, body: a.raw.body, json: a.json, jsonA: a.json, jsonB: b?.json, rounds };
   }
+  if (probe.sigVerify) {
+    // 思考签名三步验证：①打当前渠道拿 thinking+signature → ②回放对话(真签名)发官方核验真实性
+    // → ③回放对话换成伪造签名再发回当前渠道，看是否被拒绝。②③依赖 probe.buildSigReplay/
+    // buildFakeSigPayload（探针自身实现，见 anthropic.js），无有效签名时探针返回 null 自动跳过。
+    const step1 = await send(payload);
+    const rounds = [{ label: '①特征校验', body: step1.raw.body, httpStatus: step1.raw.httpStatus, id: step1.json?.id }];
+    const replay = step1.json && probe.buildSigReplay ? probe.buildSigReplay(payload, step1.json) : null;
+    let sigVerifyB = null, sigVerifyC = null;
+    if (replay) {
+      const bPayload = { model: payload.model, maxTokens: 300, thinking: payload.thinking, messages: replay.messages };
+      const bRes = await core.officialSigVerify(bPayload, eh['anthropic-beta']);
+      sigVerifyB = bRes;
+      rounds.push({ label: '②官方真实性核验', body: bRes.body || bRes.error || (bRes.skip ? '(未配置官方Key，已跳过)' : ''), httpStatus: bRes.httpStatus ?? 0 });
+
+      const fakeBase = { model: payload.model, max_tokens: 300, thinking: payload.thinking, messages: replay.messages };
+      const fakePayload = wire(probe.buildFakeSigPayload(fakeBase, replay));
+      const cSend = await send(fakePayload);
+      sigVerifyC = { httpStatus: cSend.raw.httpStatus, body: cSend.raw.body, json: cSend.json };
+      rounds.push({ label: '③伪造签名对照(当前渠道)', body: cSend.raw.body, httpStatus: cSend.raw.httpStatus, id: cSend.json?.id });
+    }
+    return { ...base, httpStatus: step1.raw.httpStatus, headers: step1.raw.headers, body: step1.raw.body, json: step1.json, sigVerifyB, sigVerifyC, rounds };
+  }
   if (probe.dualStream) {
     const ns = await send(payload);
     const streamPayload = { ...payload, stream: true };
@@ -531,9 +554,10 @@ async function executeProbe(probe, payload) {
 function sharedCtx() {
   // 跨探针共享：渠道判定、注入信号、响应头指纹、回链末端上游等。stage 串行保证后序探针读到前序写入。
   const ch = state.results.channel_id?.result?._ctx?.shared?.channel;
+  const identitySignals = state.results.identity?.result?._ctx?.shared?.identitySignals;
   const inj = state.results.param_check?.result?._ctx?.shared?.injection;
   const up = state.results.upstream_trace?.result?._ctx?.shared;
-  return { channel: ch || null, injection: inj || null, upstream: up?.upstream || null, headers: up?.headers || null };
+  return { channel: ch || null, identitySignals: identitySignals || null, injection: inj || null, upstream: up?.upstream || null, headers: up?.headers || null };
 }
 
 function selectedLongContextTierKeys() {
@@ -653,6 +677,7 @@ function setResult(card, result, probe, ctx) {
   const verdictCls = result.severity === 'critical' ? 'crit' : b.cls;
   card.className = 'card probe-card ' + verdictCls;   // 注意：清掉 compact，下面按结果重新决定
   card.dataset.verdict = verdictCls;
+  card.dataset.score = result.score == null ? '' : String(result.score);
 
   // 异常项（严重/失败/出错）→ 展开成大卡片并自动展开请求/响应；
   // 正常项（真/不适用/跳过）→ 收成紧凑行（点击行首可再展开）。
@@ -704,16 +729,23 @@ function reflowCards() {
   const summary = $('#resultSummary');
   const cards = $$('#cards .probe-card');
   const rank = (c) => ({ crit: 0, fail: 1, warn: 2 }[c.dataset.verdict] ?? 9);
-  // 异常项排前（按严重度），其余维持原顺序
-  const sorted = [...cards].sort((a, b) => rank(a) - rank(b));
+  // 非异常卡片（rank===9）里，70~99 分「良好未满分」排在满分/不适用之前，便于关注。
+  const scoreRank = (c) => {
+    const s = Number(c.dataset.score);
+    if (c.dataset.score === '' || Number.isNaN(s)) return 1; // 无分数（不适用/跳过）：排最后
+    return (s >= 70 && s < 100) ? 0 : 1;
+  };
+  const sorted = [...cards].sort((a, b) => rank(a) - rank(b) || scoreRank(a) - scoreRank(b));
   sorted.forEach((c) => box.appendChild(c));   // appendChild 会移动节点，summary 仍在最前
 
   const abnormal = cards.filter((c) => rank(c) < 9).length;
+  const attention = cards.filter((c) => rank(c) === 9 && scoreRank(c) === 0).length;
   const done = cards.filter((c) => c.dataset.verdict).length;
   if (done) {
     summary.style.display = '';
-    const normal = done - abnormal;
-    summary.innerHTML = `共 <b>${done}</b> 项 · <span class="rs-bad">${abnormal}</span> 项异常已展开 · <span class="rs-ok">${normal}</span> 项正常已折叠（点击行首查看）`;
+    const normal = done - abnormal - attention;
+    const attnPart = attention ? ` · <span class="rs-attn">${attention}</span> 项良好未满分待关注` : '';
+    summary.innerHTML = `共 <b>${done}</b> 项 · <span class="rs-bad">${abnormal}</span> 项异常已展开${attnPart} · <span class="rs-ok">${normal}</span> 项正常已折叠（点击行首查看）`;
   } else {
     summary.style.display = 'none';
   }
@@ -1191,8 +1223,12 @@ function openHistoryDetail(id) {
   // 与 core.shareReport 的 hash 静态分享同款编码，report.js 的 #data= 分支会原样解码渲染
   const packed = btoa(unescape(encodeURIComponent(JSON.stringify(item))));
   // iframe 内部加载用带后缀的 report.html（用户看不到此 URL，且不依赖服务器伪静态，任何部署都稳）；
+  // 用绝对 https 路径而非相对路径：若站点在 Cloudflare Flexible SSL 后面，
+  // 「.html→无后缀」的 301 伪静态规则可能把协议判成 http，导致 iframe 被当成混合内容拦截、显示空白；
+  // 这里显式拼 https 绝对地址，双保险，不依赖 nginx 那条规则是否写对协议。
   // 用户能看到/复制的对外链接（shareReport 生成的）才去掉 .html 后缀。
-  frame.src = `report.html#data=${packed}`;
+  const base = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}report.html`;
+  frame.src = `${base}#data=${packed}`;
   if (title) title.textContent = `检测报告 · ${fmtTime(item.savedAt)} · ${item.model || item.protocol || ''}`;
   overlay.style.display = '';
   overlay.setAttribute('aria-hidden', 'false');

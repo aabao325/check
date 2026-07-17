@@ -261,13 +261,18 @@ const identity = {
 
 const thinking_signature = {
   id: 'thinking_signature', name: '思考签名验证 ⭐', weight: 25, modes: ['Q', 'S', 'F'], sigVerify: true,
+  // 成本控制：effort 用 low（而非 high）、max_tokens 收紧到刚好够用——沿用「欧几里得算法」
+  // 这个轻量但能跨模型稳定触发思考的问题，而不是改成"1+1=?"之类极简问题：adaptive 模式下
+  // 模型可能判定"太简单无需思考"而不产生 thinking 块，会把真实官方渠道误判为"假"。
   defaultPayload: (m) => ({
-    model: m, max_tokens: 16000,
+    model: m, max_tokens: 1024,
     thinking: { type: 'adaptive', display: 'summarized' },
-    output_config: { effort: 'high' },
+    output_config: { effort: 'low' },
     messages: [{ role: 'user', content: '用欧几里得算法求 2378 和 1547 的最大公约数，给出每一步。' }],
   }),
-  /* Step①响应里提取思考块，构造供 Step②③ 复用的回放对话（原始问题 + assistant 思考回放 + 追问）。
+  /* Step①响应里提取思考块，构造供 Step②③ 复用的回放对话（原始问题 + assistant 思考回放 + 极简追问）。
+   * 追问用最短的 "ok" 而非完整句子——省钱的核心思路：②③两步只是要看服务端是否报「签名无效」，
+   * 不需要模型真正说什么，追问越短、max_tokens 越低，两步的花费就越接近于零。
    * 无思考块或签名缺失时返回 null，调用方（app.js）据此跳过 Step②③。 */
   buildSigReplay(payload, json) {
     const blocks = thinkingBlocks(json);
@@ -277,7 +282,7 @@ const thinking_signature = {
     const messages = [
       ...payload.messages,
       { role: 'assistant', content: [thinkBlock, ...textBlocks] },
-      { role: 'user', content: '请用一句话总结你刚才的最终答案。' },
+      { role: 'user', content: 'ok' },
     ];
     return { messages, thinkBlock };
   },

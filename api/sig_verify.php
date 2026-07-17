@@ -10,11 +10,12 @@
  * 走服务器配置的官方 Key，避免被当作任意转发代理滥用。
  *
  * POST body: {
- *   model:      "claude-opus-4-8",
- *   maxTokens?: 300,
- *   thinking:   {...},           // 与原探针请求一致的 thinking 配置
- *   messages:   [...],           // 回放对话（含 assistant 思考块+签名）
- *   betaHeader?:"interleaved-thinking-2025-05-14,..."
+ *   model:        "claude-opus-4-8",
+ *   maxTokens?:   20,
+ *   thinking:     {...},           // 与原探针请求一致的 thinking 配置
+ *   outputConfig?:{...},           // 如 {effort:"low"}，控制核验请求的思考强度（省钱）
+ *   messages:     [...],           // 回放对话（含 assistant 思考块+签名）
+ *   betaHeader?:  "interleaved-thinking-2025-05-14,..."
  * }
  * 返回: { ok, httpStatus, body }  // body 为官方原始响应字符串，前端自行解析
  */
@@ -39,11 +40,14 @@ if (!is_array($messages) || !count($messages)) {
 
 $payload = [
     'model'      => $model,
-    'max_tokens' => (int) ($in['maxTokens'] ?? 300),
+    'max_tokens' => (int) ($in['maxTokens'] ?? 20),
     'messages'   => $messages,
 ];
 if (!empty($in['thinking'])) {
     $payload['thinking'] = $in['thinking'];
+}
+if (!empty($in['outputConfig'])) {
+    $payload['output_config'] = $in['outputConfig'];
 }
 
 $headers = [

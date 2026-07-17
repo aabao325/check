@@ -4,3 +4,4 @@ api/config.php
 # 分享报告数据目录（运行时生成）
 data/*
 !data/.gitkeep
+docs

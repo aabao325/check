@@ -498,17 +498,19 @@ async function executeProbe(probe, payload) {
     // 思考签名三步验证：①打当前渠道拿 thinking+signature → ②回放对话(真签名)发官方核验真实性
     // → ③回放对话换成伪造签名再发回当前渠道，看是否被拒绝。②③依赖 probe.buildSigReplay/
     // buildFakeSigPayload（探针自身实现，见 anthropic.js），无有效签名时探针返回 null 自动跳过。
+    // 成本控制：②③两步只是验证「服务端是否报签名错误」，不关心回复内容，因此追问用最短的 "ok"、
+    // max_tokens 压到 20、effort 压到 low——不管真实签名还是伪造签名，这两步几乎零成本。
     const step1 = await send(payload);
     const rounds = [{ label: '①特征校验', body: step1.raw.body, httpStatus: step1.raw.httpStatus, id: step1.json?.id }];
     const replay = step1.json && probe.buildSigReplay ? probe.buildSigReplay(payload, step1.json) : null;
     let sigVerifyB = null, sigVerifyC = null;
     if (replay) {
-      const bPayload = { model: payload.model, maxTokens: 300, thinking: payload.thinking, messages: replay.messages };
+      const bPayload = { model: payload.model, maxTokens: 20, thinking: payload.thinking, outputConfig: { effort: 'low' }, messages: replay.messages };
       const bRes = await core.officialSigVerify(bPayload, eh['anthropic-beta']);
       sigVerifyB = bRes;
       rounds.push({ label: '②官方真实性核验', body: bRes.body || bRes.error || (bRes.skip ? '(未配置官方Key，已跳过)' : ''), httpStatus: bRes.httpStatus ?? 0 });
 
-      const fakeBase = { model: payload.model, max_tokens: 300, thinking: payload.thinking, messages: replay.messages };
+      const fakeBase = { model: payload.model, max_tokens: 20, thinking: payload.thinking, output_config: { effort: 'low' }, messages: replay.messages };
       const fakePayload = wire(probe.buildFakeSigPayload(fakeBase, replay));
       const cSend = await send(fakePayload);
       sigVerifyC = { httpStatus: cSend.raw.httpStatus, body: cSend.raw.body, json: cSend.json };

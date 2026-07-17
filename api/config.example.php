@@ -22,10 +22,13 @@ return [
 
     // ---- （可选）Anthropic 官方直连 key，用于：
     //   ① count_tokens 精确核对中转站上报的 input_tokens
-    //   ② 思考签名三步验证的「真实性核验」——把思考块回放给官方判断签名是否真实签发
+    //   ② 思考签名三步验证的「真实性核验」——把思考签名回放给官方判断是否真实签发
     // 没有就留空，对应探针会跳过这部分核验（不计分不扣分）。
     'OFFICIAL_COUNT_KEY' => '',               // 形如 sk-ant2-xxx
     'OFFICIAL_BASE_URL'  => 'https://api.anthropic.com',
+    // 思考签名核验用的官方模型：签名验证与被测渠道用的模型无关（官方按 thinking 块本身校验签名，
+    // 不看当前请求的 model），固定用最便宜的 Haiku 系列即可，无需为核验专门调用贵模型。
+    'OFFICIAL_VERIFY_MODEL' => 'claude-haiku-4-5-20251001',
 
     // ---- 分享报告的「品牌位」（报告页顶栏 / 页脚 / PNG 水印都会显示）----
     'SITE_NAME'   => '开源 AI 检测站',

@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=32';
-import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=32';
-import { openaiProtocol } from './protocols/openai.js?v=32';
-import { geminiProtocol } from './protocols/gemini.js?v=32';
+import * as core from './core.js?v=33';
+import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=33';
+import { openaiProtocol } from './protocols/openai.js?v=33';
+import { geminiProtocol } from './protocols/gemini.js?v=33';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -495,23 +495,24 @@ async function executeProbe(probe, payload) {
     return { ...base, httpStatus: a.raw.httpStatus, headers: a.raw.headers, body: a.raw.body, json: a.json, jsonA: a.json, jsonB: b?.json, rounds };
   }
   if (probe.sigVerify) {
-    // 思考签名三步验证：①打当前渠道拿 thinking+signature → ②回放对话(真签名)发官方核验真实性
-    // → ③回放对话换成伪造签名再发回当前渠道，看是否被拒绝。②③依赖 probe.buildSigReplay/
-    // buildFakeSigPayload（探针自身实现，见 anthropic.js），无有效签名时探针返回 null 自动跳过。
-    // 成本控制：②③两步只是验证「服务端是否报签名错误」，不关心回复内容，因此追问用最短的 "ok"、
-    // max_tokens 压到 20、effort 压到 low——不管真实签名还是伪造签名，这两步几乎零成本。
+    // 思考签名三步验证：①打当前渠道拿 thinking+signature → ②把签名发官方核验真实性
+    // → ③把签名换成伪造串再发回当前渠道，看是否被拒绝。②③依赖 probe.extractSignature/
+    // buildSigCheckPayload/buildFakeSignature（探针自身实现，见 anthropic.js），
+    // 无有效签名时 extractSignature 返回 null，自动跳过②③。
+    // 成本控制：②③两步都是"thinking 文本留空 + 签名 + 一句 hi，max_tokens=1"的最小请求体——
+    // 签名验证只看 signature 本身，不需要回放原始问题/回复，两步几乎零成本。
+    // Step②额外走固定的官方最便宜模型（服务端 OFFICIAL_VERIFY_MODEL 配置），与当前测试模型无关。
     const step1 = await send(payload);
     const rounds = [{ label: '①特征校验', body: step1.raw.body, httpStatus: step1.raw.httpStatus, id: step1.json?.id }];
-    const replay = step1.json && probe.buildSigReplay ? probe.buildSigReplay(payload, step1.json) : null;
+    const sig = step1.json && probe.extractSignature ? probe.extractSignature(step1.json) : null;
     let sigVerifyB = null, sigVerifyC = null;
-    if (replay) {
-      const bPayload = { model: payload.model, maxTokens: 20, thinking: payload.thinking, outputConfig: { effort: 'low' }, messages: replay.messages };
-      const bRes = await core.officialSigVerify(bPayload, eh['anthropic-beta']);
+    if (sig) {
+      const bRes = await core.officialSigVerify(sig);
       sigVerifyB = bRes;
       rounds.push({ label: '②官方真实性核验', body: bRes.body || bRes.error || (bRes.skip ? '(未配置官方Key，已跳过)' : ''), httpStatus: bRes.httpStatus ?? 0 });
 
-      const fakeBase = { model: payload.model, max_tokens: 20, thinking: payload.thinking, output_config: { effort: 'low' }, messages: replay.messages };
-      const fakePayload = wire(probe.buildFakeSigPayload(fakeBase, replay));
+      const fakeSig = probe.buildFakeSignature ? probe.buildFakeSignature(sig) : sig;
+      const fakePayload = wire(probe.buildSigCheckPayload(payload.model, fakeSig));
       const cSend = await send(fakePayload);
       sigVerifyC = { httpStatus: cSend.raw.httpStatus, body: cSend.raw.body, json: cSend.json };
       rounds.push({ label: '③伪造签名对照(当前渠道)', body: cSend.raw.body, httpStatus: cSend.raw.httpStatus, id: cSend.json?.id });

@@ -86,18 +86,18 @@ export async function pingBackend() {
 }
 
 /* ---------- 思考签名真实性核验：走 sig_verify.php ----------
- * 把回放对话（含原始思考块+签名）转发给官方 Anthropic，用服务器配置的 OFFICIAL_COUNT_KEY 鉴权。
- * 未配置时后端返回 {ok:false, skip:true}，调用方据此跳过这一步（不计分不扣分）。
- * @param {object} payload { model, maxTokens?, thinking?, messages }
- * @param {string} [betaHeader]
+ * 只需传一个思考签名字符串；后端固定用管理员配置的官方 Key + 最便宜模型(OFFICIAL_VERIFY_MODEL)
+ * 构造最小化验证请求（thinking 文本留空 + 签名 + 一句 "hi"，max_tokens=1，成本几乎为零）。
+ * 未配置官方 Key 时后端返回 {ok:false, skip:true}，调用方据此跳过这一步（不计分不扣分）。
+ * @param {string} signature
  * @returns {Promise<{ok, httpStatus?, body?, error?, skip?}>}
  */
-export async function officialSigVerify(payload, betaHeader) {
+export async function officialSigVerify(signature) {
   try {
     const res = await fetch(`${PROXY.base}/sig_verify.php`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, betaHeader }),
+      body: JSON.stringify({ signature }),
     });
     return await res.json();
   } catch (e) {

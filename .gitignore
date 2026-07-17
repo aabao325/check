@@ -5,3 +5,5 @@ api/config.php
 data/*
 !data/.gitkeep
 docs
+test
+

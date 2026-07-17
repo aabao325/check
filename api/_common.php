@@ -38,6 +38,7 @@ define('GLM_URL',            cfg_get($__cfg, 'GLM_URL', 'https://open.bigmodel.c
 
 define('OFFICIAL_COUNT_KEY', cfg_get($__cfg, 'OFFICIAL_COUNT_KEY', ''));
 define('OFFICIAL_BASE_URL',  cfg_get($__cfg, 'OFFICIAL_BASE_URL', 'https://api.anthropic.com'));
+define('OFFICIAL_VERIFY_MODEL', cfg_get($__cfg, 'OFFICIAL_VERIFY_MODEL', 'claude-haiku-4-5-20251001'));
 
 define('SITE_NAME',          cfg_get($__cfg, 'SITE_NAME', '开源 AI 检测站'));
 define('SITE_URL',           cfg_get($__cfg, 'SITE_URL', 'https://www.aabao.ai'));

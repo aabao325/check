@@ -12,7 +12,7 @@
  *
  * 思路全部吸收自 veridrop 的 anthropic detectors（权重、阈值对齐）。
  * ===================================================================== */
-import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity, applySecondRoundIdentityCheck, parseJsonLoose } from '../core.js?v=32';
+import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity, applySecondRoundIdentityCheck, parseJsonLoose } from '../core.js?v=33';
 
 // 多模态魔法串（PDF 探针）。
 const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
@@ -259,6 +259,14 @@ const identity = {
   },
 };
 
+/* 思考签名探针②③步的判定标记：官方响应里 context_management.applied_edits 数组含
+ * type==='clear_thinking_20251015' 的一项，是官方「识别并处理了这个思考签名」的强证据——
+ * 比单纯的「没报错」更硬：伪造串在原理上不可能触发这个标记（除非上游压根没做真实校验）。 */
+function hasClearThinkingEdit(json) {
+  const edits = json && json.context_management && json.context_management.applied_edits;
+  return Array.isArray(edits) && edits.some((e) => e && e.type === 'clear_thinking_20251015');
+}
+
 const thinking_signature = {
   id: 'thinking_signature', name: '思考签名验证 ⭐', weight: 25, modes: ['Q', 'S', 'F'], sigVerify: true,
   // 成本控制：effort 用 low（而非 high）、max_tokens 收紧到刚好够用——沿用「欧几里得算法」
@@ -270,30 +278,29 @@ const thinking_signature = {
     output_config: { effort: 'low' },
     messages: [{ role: 'user', content: '用欧几里得算法求 2378 和 1547 的最大公约数，给出每一步。' }],
   }),
-  /* Step①响应里提取思考块，构造供 Step②③ 复用的回放对话（原始问题 + assistant 思考回放 + 极简追问）。
-   * 追问用最短的 "ok" 而非完整句子——省钱的核心思路：②③两步只是要看服务端是否报「签名无效」，
-   * 不需要模型真正说什么，追问越短、max_tokens 越低，两步的花费就越接近于零。
-   * 无思考块或签名缺失时返回 null，调用方（app.js）据此跳过 Step②③。 */
-  buildSigReplay(payload, json) {
+  /* 从 Step①响应提取思考块的 signature，供 Step②③ 复用；无思考块或签名缺失时返回 null，
+   * 调用方（app.js）据此跳过 Step②③。 */
+  extractSignature(json) {
     const blocks = thinkingBlocks(json);
     if (!blocks.length || !blocks[0].signature) return null;
-    const thinkBlock = blocks[0];
-    const textBlocks = (json.content || []).filter((c) => c.type === 'text');
-    const messages = [
-      ...payload.messages,
-      { role: 'assistant', content: [thinkBlock, ...textBlocks] },
-      { role: 'user', content: 'ok' },
-    ];
-    return { messages, thinkBlock };
+    return blocks[0].signature;
   },
-  /* Step③：把回放对话里的真实签名替换成同长度随机 base64 串，构造发回当前渠道的伪造签名请求体。 */
-  buildFakeSigPayload(payload, replay) {
-    const fakeSig = randomSigLike(replay.thinkBlock.signature.length);
-    const messages = replay.messages.map((m) => {
-      if (m.role !== 'assistant' || !Array.isArray(m.content)) return m;
-      return { ...m, content: m.content.map((c) => (c.type === 'thinking' ? { ...c, signature: fakeSig } : c)) };
-    });
-    return { ...payload, messages };
+  /* 构造仅含签名的最小验证请求体：thinking 文本留空（签名验证只看 signature 本身，不依赖文本内容），
+   * 后接一句 "hi"，max_tokens=1——把验证成本压到近乎零。Step③ 发给当前渠道时复用本方法，
+   * 传入伪造签名即可；Step②（发官方）由后端 sig_verify.php 用同样结构自行构造，前端只传签名串。 */
+  buildSigCheckPayload(model, signature) {
+    return {
+      model,
+      max_tokens: 1,
+      messages: [
+        { role: 'assistant', content: [{ type: 'thinking', thinking: '', signature }] },
+        { role: 'user', content: 'hi' },
+      ],
+    };
+  },
+  /* 生成一个与真实签名等长的伪造签名（Step③ 伪造签名对照用），字节完全随机，结构像合法签名但密钥必然不对。 */
+  buildFakeSignature(realSignature) {
+    return randomSigLike((realSignature || '').length);
   },
   analyze(ctx) {
     const isKiro = ctx.shared && ctx.shared.channel && ctx.shared.channel.code === 'kiro';
@@ -345,17 +352,26 @@ const thinking_signature = {
       const bJson = bParsed.ok ? bParsed.value : null;
       const bText = `${b.body || ''} ${JSON.stringify(bJson || {})}`.toLowerCase();
       const officialRejectedSig = b.httpStatus >= 400 && SIG_REJECT_RE.test(bText);
+      const officialConfirmed = bJson && hasClearThinkingEdit(bJson);
       const officialAccepted = b.httpStatus >= 200 && b.httpStatus < 300 && bJson && !isAnthropicError(bJson);
       if (officialRejectedSig) {
         score = 0; severity = 'critical';
         diffs.push(`Step②：官方明确拒绝该签名（疑似签名校验失败）→ 坐实伪造：${(b.body || '').slice(0, 120)}`);
+      } else if (officialConfirmed) {
+        if (isKiro) {
+          verdictCap = '存疑';
+          diffs.push('Kiro 渠道出现的思考签名已命中官方 clear_thinking_20251015 确认标记，但仍建议人工复核（Kiro 官方不应有此字段）');
+        } else {
+          score = 100;
+          features.push('Step②：命中官方 context_management.clear_thinking_20251015 确认标记 → 官方明确识别并处理了该签名（无法伪造的强证据）→ 分数上修为 100');
+        }
       } else if (officialAccepted) {
         if (isKiro) {
           verdictCap = '存疑';
           diffs.push('Kiro 渠道出现的思考签名已通过官方核验，但仍建议人工复核（Kiro 官方不应有此字段）');
         } else {
           score = 100;
-          features.push('Step②：官方接受该签名的回放对话（无法伪造的强证据）→ 分数上修为 100');
+          features.push('Step②：官方接受该签名未报错（未见 clear_thinking_20251015 标记，可能因模型/版本不返回该字段）→ 分数上修为 100');
         }
       } else {
         features.push(`Step②：官方请求失败但非签名相关原因（HTTP ${b.httpStatus}）→ 无法判断，不改动分数`);
@@ -368,9 +384,16 @@ const thinking_signature = {
     if (c) {
       const cText = `${c.body || ''} ${JSON.stringify(c.json || {})}`.toLowerCase();
       const channelRejectedFake = c.httpStatus >= 400 && SIG_REJECT_RE.test(cText);
+      const channelConfirmedFake = c.json && hasClearThinkingEdit(c.json);
       const channelAcceptedFake = c.httpStatus >= 200 && c.httpStatus < 300;
       if (channelRejectedFake) {
         features.push('Step③：当前渠道拒绝了伪造签名 → 渠道确实执行了签名校验 ✓');
+      } else if (channelConfirmedFake) {
+        // 伪造串在密码学原理上不可能通过真实校验，若渠道对伪造签名仍返回官方确认标记，
+        // 说明它压根没做真实签名校验（要么并非真实转发到官方，要么服务端从不校验签名）——
+        // 证据强度高于「仅仅不报错」，直接坐实假，不再走 verdictCap 降级路径。
+        score = 0; severity = 'critical';
+        diffs.push('Step③：当前渠道对伪造签名仍返回 clear_thinking_20251015 确认标记 → 伪造串在原理上不可能通过真实校验，坐实并非真实签名校验（非真实 Claude 渠道，或上游从不校验签名）');
       } else if (channelAcceptedFake) {
         diffs.push('Step③：当前渠道未校验伪造签名，正常返回 → 存疑：可能上游忽略了 signature 字段做转发，也可能并非真实 Claude 渠道');
         verdictCap = verdictCap || '存疑';

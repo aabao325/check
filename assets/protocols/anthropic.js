@@ -12,7 +12,7 @@
  *
  * 思路全部吸收自 veridrop 的 anthropic detectors（权重、阈值对齐）。
  * ===================================================================== */
-import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity, applySecondRoundIdentityCheck, parseJsonLoose } from '../core.js?v=33';
+import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity, applySecondRoundIdentityCheck, parseJsonLoose } from '../core.js?v=34';
 
 // 多模态魔法串（PDF 探针）。
 const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
@@ -128,6 +128,18 @@ function toolUseBlocks(json) {
 }
 function isAnthropicError(json) {
   return json && json.type === 'error' && json.error && typeof json.error === 'object';
+}
+/* 官方安全拒答（refusal）识别：Claude（含 claude-fable-5）触发用量政策限制时会返回
+ * HTTP 200、content:[] 空、stop_reason:'refusal'，并带 stop_details:{type:'refusal', category, explanation}。
+ * 这是官方特有、极难伪造的响应结构——本身即验真信号，不能当作「无输出/假」处理。 */
+function isGenuineRefusal(json) {
+  if (!json || json.type !== 'message' || json.stop_reason !== 'refusal') return false;
+  const sd = json.stop_details;
+  return !!(sd && typeof sd === 'object' && sd.type === 'refusal');
+}
+function refusalNote(json) {
+  const sd = json.stop_details || {};
+  return `官方安全拒答(refusal${sd.category ? '·' + sd.category : ''})：${(sd.explanation || '').slice(0, 100)}`;
 }
 
 /* 失败兜底结果 */
@@ -613,8 +625,20 @@ const tool_schema_stream = {
       score += 45;
       const tu = tus[0];
       features.push(`生成 tool_use: ${tu.name}`);
-      if (tu.input && tu.input.schema && typeof tu.input.schema === 'object') { score += 20; features.push('tool_use.input 含合法 schema 对象 ✓'); }
-      else diffs.push('tool_use.input.schema 缺失或残缺');
+      // 流式 tool_use 的参数不在单个事件里，而是 content_block_start 带空 input:{}，随后一连串
+      // content_block_delta 的 input_json_delta.partial_json 碎片，需【按 index 全部拼接】完毕
+      // （content_block_stop 后）才是合法 JSON。core.parseSSE→rebuildAnthropicMessage 已按此累积并
+      // 在收尾统一 JSON.parse，解析成功即为完整 tu.input；失败则打 _inputParseError 标记。
+      if (tu._inputParseError) {
+        diffs.push('tool_use 分片拼接后 JSON 解析失败 → 疑似中转层丢了 input_json_delta 分片或截断了流（拼接结果非合法 JSON）');
+      } else if (tu.input && typeof tu.input === 'object' && tu.input.schema && typeof tu.input.schema === 'object') {
+        score += 20; features.push('分片拼接后 tool_use.input 为完整 JSON，顶层含 schema 对象 ✓');
+        if (typeof tu.input.description === 'string') features.push('input 顶层含 description ✓');
+      } else if (tu.input && typeof tu.input === 'object' && Object.keys(tu.input).length) {
+        diffs.push(`tool_use.input 已解析但顶层缺 schema 字段（实得 keys: ${Object.keys(tu.input).join(', ')}）`);
+      } else {
+        diffs.push('tool_use.input 为空 → 未收到任何 input_json_delta 分片（疑流式参数未透传）');
+      }
     } else diffs.push('未生成 tool_use 块');
     score = Math.min(score, 100);
     return { features, diffs, score, verdict: score >= 70 ? '真' : '假', severity: '', status: 'done' };
@@ -1204,6 +1228,12 @@ const multi_turn = {
     ],
   }),
   analyze(ctx) {
+    // claude-fable-5 等模型可能对多轮记忆题触发官方安全拒答：HTTP 200 + content:[] 空 +
+    // stop_reason:'refusal' + stop_details。这是官方特有、无法伪造的结构，本身即验真标准，
+    // 不能当作「无文本输出 → 假」。
+    if (isGenuineRefusal(ctx.json)) {
+      return { features: [refusalNote(ctx.json), '官方 refusal 响应结构（stop_reason=refusal + stop_details）→ 真实官方上游特征 ✓'], diffs: [], score: 100, verdict: '真', severity: '', status: 'done' };
+    }
     const raw = textOf(ctx.json);
     if (!raw) return fail('无文本输出');
     const t = raw.toUpperCase();

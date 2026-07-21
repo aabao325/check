@@ -2,7 +2,7 @@
  * report.js —— 分享报告查看页（只读）
  * 支持两种来源：?id=xxx（后端短链）/ #data=base64（静态分享）
  * ===================================================================== */
-import * as core from './core.js?v=33';
+import * as core from './core.js?v=34';
 
 const $ = (s) => document.querySelector(s);
 
@@ -207,12 +207,14 @@ function renderResults(results) {
 function buildSlimRow(r) {
   const d = document.createElement('details');
   d.className = 'probe-slim';
-  const score = (r.status === 'skip' || r.score == null) ? '不适用' : r.score;
+  const unresponsive = r.status === 'unresponsive';
+  const score = unresponsive ? '未成功响应' : ((r.status === 'skip' || r.score == null) ? '不适用' : r.score);
+  const tick = unresponsive ? '📡' : '✅';
   const hasDetail = (r.features || []).length || (r.diffs || []).length;
   const ioHtml = buildIoBlock(r.io);
   d.innerHTML = `
     <summary>
-      <span class="slim-tick">✅</span>
+      <span class="slim-tick">${tick}</span>
       <span class="slim-name">${core.esc(r.name)}</span>
       <span class="slim-score">${score}</span>
     </summary>

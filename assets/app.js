@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=33';
-import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=33';
-import { openaiProtocol } from './protocols/openai.js?v=33';
-import { geminiProtocol } from './protocols/gemini.js?v=33';
+import * as core from './core.js?v=34';
+import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=34';
+import { openaiProtocol } from './protocols/openai.js?v=34';
+import { geminiProtocol } from './protocols/gemini.js?v=34';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -306,6 +306,7 @@ function renderCardsNav() {
 function navClsOf(result) {
   if (!result) return '';
   if (result.status === 'error') return 'warn';
+  if (result.status === 'unresponsive') return 'na';
   if (result.status === 'skip') return 'skip';
   if (result.severity === 'critical') return 'crit';
   if (result.severity === 'warn') return 'warn';
@@ -386,6 +387,49 @@ function buildCard(probe) {
   return card;
 }
 
+/* ---------------- 传输层故障归一化 ----------------
+ * 核心原则：请求先要「成功响应」(HTTP 2xx) 才谈得上判真伪。若响应非 2xx（限流 429、
+ * 网关 5xx、连接失败 httpStatus=0 等），说明请求遇到了故障，不应作为「0 分 / 假」的依据，
+ * 而应记为「未成功响应」(status:'unresponsive', score:null)——不计入总分、也不扣分。
+ *
+ * 但要保留「报错即验真」这类探针的既有语义（弃用参数报错、max_output_tokens 下限报错、
+ * 联网/识图不支持报错等）：这些探针本就把「官方正确报错」当作验真信号或记「不适用」，
+ * 属于程序现有的「跳过/不适用」判断逻辑，不能被本守卫覆盖。因此：
+ *   1) errorProbe / sigVerify / trace / tierNeedle / synthesize 探针一律跳过本守卫
+ *      （它们自己解读非 2xx，或压根不发普通请求）。
+ *   2) analyze 已判「不适用 / 跳过 / 出错 / 不计分(score==null)」的结果，保留不动
+ *      （web_search、vision_pdf 等能力探针遇不支持已记「不适用」，即属此列）。
+ *   3) 仅当【主响应非 2xx】且 analyze 仍给出了「计分的失败判定」时，才改判「未成功响应」。
+ */
+function primaryHttpStatus(ctx) {
+  // 多轮探针以最后一轮为准（executeProbe 已把 ctx.httpStatus 设为代表性那一轮）。
+  return ctx && typeof ctx.httpStatus === 'number' ? ctx.httpStatus : null;
+}
+function isResponseOk(ctx) {
+  const s = primaryHttpStatus(ctx);
+  return s != null && s >= 200 && s < 300;
+}
+function normalizeTransportFailure(probe, ctx, result) {
+  // 自管非 2xx 语义 / 不发普通请求的探针：不介入
+  if (probe.errorProbe || probe.sigVerify || probe.trace || probe.tierNeedle || probe.synthesize) return result;
+  // 合成/无 httpStatus（httpStatus:null）：不介入
+  if (primaryHttpStatus(ctx) == null) return result;
+  // 响应正常 2xx：交给 analyze 原判（此时的低分是模型真的没做到，属真实证据，保留）
+  if (isResponseOk(ctx)) return result;
+  // 非 2xx，但 analyze 已按「能力不适用 / 跳过」处理（web_search/vision_pdf/json_schema 遇
+  // 官方正确报错记「不适用」等）：这是程序既有的、正确的验真跳过逻辑，保留不动。
+  if (result.status === 'skip' || result.verdict === '不适用') return result;
+  // 其余非 2xx 情形（analyze 给了计分失败判定，或因无可解析响应记「出错」）→ 统一改判
+  // 「未成功响应」：属请求故障，不计分、不扣分。
+  const st = primaryHttpStatus(ctx);
+  const reason = st === 0 || st === null ? '连接失败（目标地址不可达/超时/拒绝代理）' : `HTTP ${st}`;
+  return {
+    features: [`请求未成功响应：${reason}`, ...(result.features || [])],
+    diffs: [`该请求未返回 2xx 正常响应（${reason}），属请求故障而非模型证伪，本项不计分。请排查中转站可用性/限流后重测。`],
+    score: null, verdict: '未成功响应', severity: '', status: 'unresponsive',
+  };
+}
+
 /* ---------------- 运行单个探针 ---------------- */
 async function runOne(probe, card) {
   const badge = card.querySelector('.vbadge');
@@ -411,7 +455,7 @@ async function runOne(probe, card) {
 
   try {
     const ctx = await executeProbe(probe, payload);
-    const result = probe.analyze(ctx);
+    const result = normalizeTransportFailure(probe, ctx, probe.analyze(ctx));
     result._ctx = ctx;
     state.results[probe.id] = { probe, result };
     setResult(card, result, probe, ctx);

@@ -191,10 +191,16 @@ function rebuildAnthropicMessage(events) {
     }
   }
   if (msg) {
-    // 把 tool_use 的 partial_json 收尾
+    // 把 tool_use 的 partial_json 收尾。
+    // 关键：流式里 content_block_start 只带空的 input:{}，真正的参数是一连串
+    // content_block_delta 的 input_json_delta.partial_json 碎片，必须【按 index 全部拼接】
+    // 完毕后才是合法 JSON（单个分片不能单独 parse）。因此只要该块累积过 partial_json，
+    // 就用拼接结果覆盖那个空的 input:{}（旧逻辑用 `!b.input` 判断，而 {} 为真会导致永远不解析、
+    // input 恒为空 → 误判「schema 缺失」）。拼接后仍解析失败 = 疑似中转层丢了分片/截断了流。
     for (const b of blocks) {
-      if (b && b.partial_json && !b.input) {
-        try { b.input = JSON.parse(b.partial_json); } catch { /* ignore */ }
+      if (b && typeof b.partial_json === 'string' && b.partial_json.length) {
+        try { b.input = JSON.parse(b.partial_json); }
+        catch { b._inputParseError = true; }
       }
     }
     msg.content = blocks.filter(Boolean);
@@ -279,6 +285,8 @@ export function scoreTotal(results) {
 
 /* ---------- 严重度/状态 → 徽标文本 ---------- */
 export function verdictBadge(r) {
+  // 未成功响应：请求遇到故障（非 2xx / 连接失败），不作为「假」的依据，中性不计分。
+  if (r.status === 'unresponsive') return { text: '📡 未成功响应', cls: 'na' };
   if (r.status === 'skip') return { text: '⏭ 跳过', cls: 'skip' };
   if (r.status === 'error') return { text: '⚠ 出错', cls: 'warn' };
   if (r.severity === 'warn') return { text: `⚠ 存疑 ${r.score == null ? '不适用' : r.score}`, cls: 'warn' };

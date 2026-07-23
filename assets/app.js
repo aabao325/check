@@ -1,10 +1,10 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=34';
-import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=34';
-import { openaiProtocol } from './protocols/openai.js?v=34';
-import { geminiProtocol } from './protocols/gemini.js?v=34';
+import * as core from './core.js?v=35';
+import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=35';
+import { openaiProtocol } from './protocols/openai.js?v=35';
+import { geminiProtocol } from './protocols/gemini.js?v=35';
 
 // 协议显示顺序：OpenAI（左）· Claude（中）· Gemini（右）
 const PROTOCOLS = { openai: openaiProtocol, anthropic: anthropicProtocol, gemini: geminiProtocol };
@@ -1269,12 +1269,12 @@ function openHistoryDetail(id) {
   if (!overlay || !frame) return;
   // 与 core.shareReport 的 hash 静态分享同款编码，report.js 的 #data= 分支会原样解码渲染
   const packed = btoa(unescape(encodeURIComponent(JSON.stringify(item))));
-  // iframe 内部加载用带后缀的 report.html（用户看不到此 URL，且不依赖服务器伪静态，任何部署都稳）；
-  // 用绝对 https 路径而非相对路径：若站点在 Cloudflare Flexible SSL 后面，
-  // 「.html→无后缀」的 301 伪静态规则可能把协议判成 http，导致 iframe 被当成混合内容拦截、显示空白；
-  // 这里显式拼 https 绝对地址，双保险，不依赖 nginx 那条规则是否写对协议。
-  // 用户能看到/复制的对外链接（shareReport 生成的）才去掉 .html 后缀。
-  const base = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}report.html`;
+  // iframe 加载「无后缀」的 report 路径（伪静态 try_files 会内部补 .html 直接 200 返回）。
+  // 【为什么不用 report.html】站点在 Cloudflare Flexible SSL 等反代后面时，源站 nginx 收到的是
+  // http 请求；「.html→无后缀」那条 301 规则会把 report.html 跳到 http://…/report，
+  // 于是 https 页面里嵌了个 http iframe，被浏览器当混合内容拦掉、显示空白。
+  // 无后缀路径不触发这条 301，同协议直出，从根上避开降级问题。
+  const base = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}report`;
   frame.src = `${base}#data=${packed}`;
   if (title) title.textContent = `检测报告 · ${fmtTime(item.savedAt)} · ${item.model || item.protocol || ''}`;
   overlay.style.display = '';

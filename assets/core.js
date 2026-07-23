@@ -177,7 +177,18 @@ function rebuildAnthropicMessage(events) {
     if (ev.type === 'message_start' && ev.message) {
       msg = JSON.parse(JSON.stringify(ev.message));
     } else if (ev.type === 'content_block_start') {
-      blocks[ev.index] = JSON.parse(JSON.stringify(ev.content_block || {}));
+      // 正常顺序下 content_block_start 先于 delta 到达，直接落块即可。但部分中转层会【乱序】
+      // 转发 SSE——delta 可能早于 start 到达（已在下方分支里预建了该 index 的块并累积了增量）。
+      // 若直接用 start 覆盖，会把已累积的 text/thinking/signature/partial_json 丢掉。故这里合并：
+      // 把已累积的增量字段拼接进 start 带来的块，避免丢字符。
+      const incoming = JSON.parse(JSON.stringify(ev.content_block || {}));
+      const prev = blocks[ev.index];
+      if (prev) {
+        for (const k of ['text', 'thinking', 'signature', 'partial_json']) {
+          if (prev[k]) incoming[k] = (incoming[k] || '') + prev[k];
+        }
+      }
+      blocks[ev.index] = incoming;
     } else if (ev.type === 'content_block_delta') {
       const b = blocks[ev.index] || (blocks[ev.index] = {});
       const d = ev.delta || {};

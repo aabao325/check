@@ -12,7 +12,7 @@
  *
  * 思路全部吸收自 veridrop 的 anthropic detectors（权重、阈值对齐）。
  * ===================================================================== */
-import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity, applySecondRoundIdentityCheck, parseJsonLoose } from '../core.js?v=34';
+import { detectChannelById, validateSchema, parseSSE, coefficientOfVariation, similarity, applySecondRoundIdentityCheck, parseJsonLoose } from '../core.js?v=35';
 
 // 多模态魔法串（PDF 探针）。
 const MAGIC = 'MAGIC-7F3K-VERIFY-CLAUDE-RELAY';
@@ -901,10 +901,22 @@ const integrity = {
     const ns = ctx.nonStreamJson, st = ctx.streamMessage;
     if (!ns || !st) return { features: ['需要同时跑流式+非流式（运行器自动处理）'], diffs: [], score: null, verdict: '不适用', status: 'skip' };
     const features = [], diffs = []; let score = 0;
+    // 先比模型名：真正「路由到不同模型」的强信号是 model 字段不一致，而非文本字面差异。
+    const nsModel = (ns.model || '').replace(/[._]/g, '-'), stModel = (st.model || '').replace(/[._]/g, '-');
+    const modelMatch = nsModel && stModel && (nsModel === stModel || nsModel.startsWith(stModel) || stModel.startsWith(nsModel));
+    if (nsModel && stModel && !modelMatch) features.push(`⚠ 流式/非流式 model 不一致: ${ns.model} vs ${st.model}`);
+
     const nsText = textOf(ns), stText = (st.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
     const sim = similarity(nsText, stText);
-    features.push(`文本相似度: ${(sim * 100).toFixed(0)}%`);
-    if (sim >= 0.85) score += 50; else diffs.push('流式/非流式文本差异大 → 可能路由到不同模型');
+    // 顺序无关比较：部分中转层会【乱序】转发 SSE 分片，导致流式重建文本与非流式逐字顺序不同，
+    // 但字符集完全一致（内容相同、只是碎片拼接次序被打乱）。这属传输层顺序问题，并非「不同模型」。
+    // 故 sim 偏低时再看「排序后字符多重集」是否一致：一致则视为顺序问题，不判为模型差异。
+    const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, '').split('').sort().join('');
+    const multisetSame = norm(nsText) === norm(stText);
+    features.push(`文本相似度: ${(sim * 100).toFixed(0)}%${sim < 0.85 && multisetSame ? '（字符集一致，疑中转层乱序转发 SSE 分片）' : ''}`);
+    if (sim >= 0.85) score += 50;
+    else if (multisetSame && modelMatch) { score += 50; diffs.push('流式文本与非流式顺序不同但字符集完全一致 → 中转层乱序转发 SSE 分片（非模型差异，不扣分）'); }
+    else diffs.push('流式/非流式文本差异大 → 可能路由到不同模型');
     const nsIn = ns.usage?.input_tokens, stIn = st.usage?.input_tokens;
     if (typeof nsIn === 'number' && typeof stIn === 'number') {
       const tol = Math.max(3, nsIn * 0.2);
@@ -1132,7 +1144,13 @@ const cache_behavior = {
     let score;
     if (read > 0) { score = 100; features.push('两轮命中缓存 → 官方 prompt caching 行为 ✓'); }
     else if (create > 0) { score = 50; diffs.push('创建了缓存但第二轮未命中 → 中转可能未复用缓存'); }
-    else { score = 0; diffs.push('未见 cache_creation/cache_read 字段 → 缓存能力缺失（疑套壳或弱实现）'); }
+    else {
+      // 仅凭两轮无缓存字段【不能】断定「缓存能力缺失/套壳」——可能是：模型/渠道(如部分 Bedrock/Vertex
+      // 配置)本就不返回缓存字段、prompt 未达最小可缓存门槛、或中转层未透传 cache_control。这些都需更多
+      // 轮次/换 prompt 复测才能确认，故记「存疑」而非「假」。
+      score = 50;
+      diffs.push('两轮均未见 cache_creation/cache_read 字段 → 仅凭两轮无法判定缓存命中情况（可能渠道不返回缓存字段/未达最小缓存门槛/中转层未透传 cache_control），建议增加轮次或更换更长 system 复测。');
+    }
     return { features, diffs, score, verdict: score >= 70 ? '真' : (score >= 40 ? '存疑' : '假'), severity: '', status: 'done' };
   },
 };

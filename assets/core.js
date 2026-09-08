@@ -367,6 +367,54 @@ export async function shareReport(reportPayload) {
  * 例外：标了 .io-skip-png 的「请求体/响应体」区——PNG 是对外传播图，只要结论不要
  * 原始 body（体积大、不必要）。导出时把这些区整体 display:none，且不展开它内部的
  * details，截完还原。这样用户在报告页能点开看 body，但 PNG 里不含。 */
+/* html2canvas 只实现了 linear/radial 渐变，遇到 conic-gradient 会整块跳过 →
+ * 分数圆环(.ring)在导出的 PNG 里直接消失。导出前把 conic 背景临时换成等效的
+ * SVG data-URI 背景（html2canvas 能正常光栅化），截完还原。
+ * 返回 restore()。 */
+function patchConicRings(el) {
+  const rings = [...el.querySelectorAll('.ring')];
+  const saved = [];
+  rings.forEach((ring) => {
+    const cs = getComputedStyle(ring);
+    const bgImg = cs.backgroundImage || '';
+    if (!/conic-gradient/i.test(bgImg)) return;
+    // 从 computed backgroundImage 里取已解析的两个颜色与百分比
+    const colors = bgImg.match(/rgba?\([^)]*\)|#[0-9a-f]{3,8}/gi) || [];
+    const pctM = bgImg.match(/([\d.]+)%/);
+    const valCol = colors[0] || '#3f9d6a';
+    const trackCol = colors[1] || '#e7e3d8';
+    let pct = pctM ? parseFloat(pctM[1]) : parseFloat(cs.getPropertyValue('--val')) || 0;
+    pct = Math.max(0, Math.min(100, pct));
+
+    // 尺寸与环宽：外径取元素宽，内圈用 .inner 实际宽度推环宽
+    const size = Math.round(parseFloat(cs.width)) || 96;
+    const inner = ring.querySelector('.inner');
+    const innerW = inner ? Math.round(parseFloat(getComputedStyle(inner).width)) : Math.round(size * 0.79);
+    const stroke = Math.max(2, (size - innerW) / 2);
+    const r = (size - stroke) / 2;
+    const c = 2 * Math.PI * r;
+    const dash = (pct / 100) * c;
+    const half = size / 2;
+    // 起点 12 点、顺时针（与 conic-gradient 一致）→ rotate(-90)
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`
+      + `<circle cx="${half}" cy="${half}" r="${r}" fill="none" stroke="${trackCol}" stroke-width="${stroke}"/>`
+      + `<circle cx="${half}" cy="${half}" r="${r}" fill="none" stroke="${valCol}" stroke-width="${stroke}"`
+      + ` stroke-dasharray="${dash.toFixed(2)} ${(c - dash).toFixed(2)}" transform="rotate(-90 ${half} ${half})"/>`
+      + `</svg>`;
+    saved.push({ ring, bg: ring.style.background, bgImage: ring.style.backgroundImage });
+    ring.style.background = 'none';
+    ring.style.backgroundImage = `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`;
+    ring.style.backgroundSize = '100% 100%';
+    ring.style.backgroundRepeat = 'no-repeat';
+  });
+  return () => saved.forEach(({ ring, bg, bgImage }) => {
+    ring.style.background = bg;
+    ring.style.backgroundImage = bgImage;
+    ring.style.removeProperty('background-size');
+    ring.style.removeProperty('background-repeat');
+  });
+}
+
 export async function exportPng(el, filename = 'report.png') {
   if (typeof window.html2canvas !== 'function') {
     alert('PNG 导出组件未加载（html2canvas）。请检查网络或改用链接分享。');
@@ -380,6 +428,8 @@ export async function exportPng(el, filename = 'report.png') {
   const details = [...el.querySelectorAll('details')].filter((d) => !d.classList.contains('io-skip-png') && !d.closest('.io-skip-png'));
   const prevOpen = details.map((d) => d.open);
   details.forEach((d) => { d.open = true; });
+  // 3) conic-gradient 圆环 → SVG 背景（否则 PNG 里圆环消失）
+  const restoreRings = patchConicRings(el);
   try {
     const canvas = await window.html2canvas(el, { backgroundColor: '#faf9f5', scale: 2, useCORS: true });
     const a = document.createElement('a');
@@ -387,7 +437,8 @@ export async function exportPng(el, filename = 'report.png') {
     a.download = filename;
     a.click();
   } finally {
-    // 无论成功与否都还原折叠状态与 IO 区可见性，避免改动用户当前看到的页面
+    // 无论成功与否都还原折叠状态、IO 区可见性与圆环背景，避免改动用户当前看到的页面
+    restoreRings();
     details.forEach((d, i) => { d.open = prevOpen[i]; });
     ioBlocks.forEach((d, i) => { d.style.display = prevDisplay[i]; });
   }

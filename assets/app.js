@@ -1,7 +1,7 @@
 /* =====================================================================
  * app.js —— 主页运行器：串起协议/探针/UI/打分/分享
  * ===================================================================== */
-import * as core from './core.js?v=35';
+import * as core from './core.js?v=36';
 import { anthropicProtocol, mimicClaudeCodePayload, mimicHeaders, MIMIC_DEFAULT_UA, MIMIC_DEFAULT_BILLING_TEXT } from './protocols/anthropic.js?v=35';
 import { openaiProtocol } from './protocols/openai.js?v=35';
 import { geminiProtocol } from './protocols/gemini.js?v=35';
@@ -18,7 +18,7 @@ const ISSUE_URL = REPO_URL + '/issues';
 const PROBE_DESC = {
   channel_id: '看响应 id 前缀判定渠道：Claude msg_01=官方/msg_bdrk_=Bedrock/msg_vrtx_=Vertex；OpenAI resp_=官方 Responses、chatcmpl-=疑似套 Chat 壳。渠道来源识别探针会消费「身份识别」探针先跑得到的自述信号（Claude Code / Codex / Kiro），据此把最终渠道细分展示出来（不会先显示官方再悄悄改写）。',
   identity: '问模型「你是谁/详细身份介绍」，核对自述身份是否与官方一致；暴露竞品身份（如 Claude 协议里自称 GPT、Gemini 里自称 OpenAI）=掺假；自述 Codex/Claude Code 则细分工具渠道；文本或思考内容中出现 “Kiro” 则细分为 Kiro (AWS) 渠道（Amazon 基于 Bedrock 封装的 Claude 客户端）。注：若响应 id 前缀已坐实官方渠道（如 Claude 的 msg_/msg_bdrk_/msg_vrtx_），竞品自述视为官方模型的身份幻觉（真模型也会偶发），记「不适用」而非掺假。标准/全面档额外加一轮「身份扮演验证」：注入 system/instructions 要求模型扮演一个随机虚构身份再次问身份，若模型未遵从，疑似中转层丢弃/篡改了 system 提示词，本项记「存疑」。本探针在渠道来源识别之前先跑，把渠道细分信号交给后者做最终展示，避免渠道徽标出现中间态。',
-  thinking_signature: '三步验证思考链签名：①特征校验——真签名足够长且 base64 合法（主导分）；②官方真实性核验——把①拿到的思考块回放给 Anthropic 官方，官方接受则坐实真实签发，官方明确拒绝则坐实伪造（需站点管理员配置官方 Key，未配置则跳过不计分）；③伪造签名对照——把签名换成同长度随机串发回当前渠道，若渠道未拦截则存疑（可能未做签名校验，也可能非真实 Claude）。Kiro 渠道特判：Kiro 官方不支持思考签名，无签名记不适用，若出现签名则视为高度可疑。',
+  thinking_signature: '三步验证思考链签名：①特征校验——真签名足够长且 base64 合法（主导分）；②官方真实性核验——把①拿到的签名回放给 Anthropic 官方，篡改过的签名会被官方拒绝，故官方接受即坐实官方真实签发、官方明确报签名校验失败则坐实伪造（需站点管理员配置官方 Key，未配置则跳过不计分）；③伪造签名对照——把签名换成同长度随机串发回当前渠道，若渠道未拦截则存疑（可能只转发不校验签名，也可能非真实 Claude）。Kiro 渠道特判：Kiro 官方不支持思考签名，无签名记不适用，若出现签名则视为高度可疑。',
   message_id: '检查 message id 是否符合官方规范格式。',
   protocol: '校验响应结构是否符合官方 schema（Claude usage 含 cache_creation/service_tier；OpenAI Responses 含 output/usage.input_tokens；Gemini 含 candidates/usageMetadata），并扫描套壳污染字段。',
   consistency: '同一请求多次发送，检查模型名稳定、输出方差合理（防随机换模型）。',
@@ -99,6 +99,18 @@ function renderProtoTabs() {
   }
 }
 
+/* 「签名解析器」入口。该工具是内部件、不随开源仓库发布，所以先探一次文件在不在：
+   部署了才显示入口，没部署就当它不存在，避免开源用户点出 404。
+   同时它只对 Claude 协议有意义——思考签名是 Anthropic 特有的。 */
+let sigToolReady = false;
+function updateSigToolBtn() {
+  const b = $('#sigToolBtn');
+  if (b) b.style.display = sigToolReady && state.protocol === 'anthropic' ? '' : 'none';
+}
+fetch('./sig.html', { method: 'HEAD' })
+  .then((r) => { sigToolReady = r.ok; updateSigToolBtn(); })
+  .catch(() => { /* 取不到就保持隐藏 */ });
+
 function selectProtocol(id) {
   state.protocol = id;
   state.results = {};
@@ -116,6 +128,7 @@ function selectProtocol(id) {
   const longCtxRow = $('#longCtxRow');
   if (longCtxRow) longCtxRow.style.display = id === 'anthropic' ? '' : 'none';
   if (id === 'anthropic') renderLongCtxTiers();
+  updateSigToolBtn();
   // 「完整（含长上下文）」档仅 Claude 有意义；OpenAI/Gemini 无此检测，隐藏该档
   const fBtn = $('#modeBtns .mode-btn[data-mode="F"]');
   const allowF = id === 'anthropic';

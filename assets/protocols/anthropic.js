@@ -298,14 +298,34 @@ const thinking_signature = {
     return blocks[0].signature;
   },
   /* 构造仅含签名的最小验证请求体：thinking 文本留空（签名验证只看 signature 本身，不依赖文本内容），
-   * 后接一句 "hi"，max_tokens=1——把验证成本压到近乎零。Step③ 发给当前渠道时复用本方法，
-   * 传入伪造签名即可；Step②（发官方）由后端 sig_verify.php 用同样结构自行构造，前端只传签名串。 */
+   * max_tokens=1——把验证成本压到近乎零。Step③ 发给当前渠道时复用本方法，传入伪造签名即可；
+   * Step②（发官方）由后端 sig_verify.php 用同样结构自行构造，前端只传签名串。
+   *
+   * ⚠ 实测（2026-09）：官方对请求里的历史 thinking 块一律直接剥离、不做签名校验——
+   * 「assistant(thinking)+user」「+thinking enabled」「+context_management」「tool_use+
+   * tool_result」四种形态下，真签名与逐字节篡改的签名返回完全一致。所以这一步拿不到
+   * 「渠道放过了伪造签名」的有效结论，判定侧必须先用 input_tokens 确认签名真被读入
+   * （见 analyze 里的 notActuallyChecked）。
+   *
+   * ⚠ 消息顺序与块排列都是踩过坑定下来的，改之前先读完（与后端 sig_verify.php 保持一致）：
+   *   · assistant 消息不能以 thinking 块结尾 —— 严格上游（如 Amazon
+   *     Bedrock）直接 400：`The final block in an assistant message cannot be 'thinking'`；
+   *     宽松路由却返回 200，所以「本地测通」不等于合法。
+   *   · assistant 也不能是最后一条消息 —— 那样官方会把 thinking 块整块丢掉，1168 字符签名
+   *     只换来 input_tokens=23；改成 user 收尾后 input≈281，签名才真被读入（基线仅 10）。
+   *   · 别加 thinking: {budget_tokens: N} —— 它要求 max_tokens > budget_tokens，与
+   *     max_tokens=1 冲突：官方直连报 400，中转不报错、自行抬高 max_tokens，模型把话说完
+   *     （output 21 tokens、stop_reason=end_turn），成本白涨三倍。
+   *   · 别加 tools + tool_use + tool_result —— input 从 283 涨到 636，既不省钱也换不来验签。 */
   buildSigCheckPayload(model, signature) {
     return {
       model,
       max_tokens: 1,
       messages: [
-        { role: 'assistant', content: [{ type: 'thinking', thinking: '', signature }] },
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: [
+          { type: 'thinking', thinking: '', signature }
+        ] },
         { role: 'user', content: 'hi' },
       ],
     };
@@ -349,7 +369,9 @@ const thinking_signature = {
     if (isKiro) diffs.push('渠道已判定为 Kiro (AWS)，但 Kiro 官方不应返回思考签名 → 出现签名大概率是渠道伪装，以下 Step②③ 结果需重点关注');
 
     // Step②：官方真实性核验（可上修/否决 Step①分数）
-    const SIG_REJECT_RE = /(signature|thinking|签名|思考)[\s\S]{0,40}?(invalid|mismatch|tamper|unrecognized|无效|不匹配|篡改)|(invalid|mismatch|tamper|无效|不匹配|篡改)[\s\S]{0,40}?(signature|thinking|签名|思考)/i;
+    // 判定不在前端重做，直接采信后端 sig_verify.php 给出的 verdict——判据集中在后端一处维护。
+    // verdict: real 官方接受即真实签发（篡改过的签名会被官方拒）/ fake 官方明确报签名校验失败
+    //        / unknown 通道故障或请求体非法 / inconclusive 保留档，当前判据不再产出。
     const b = ctx.sigVerifyB;
     let verdictCap = null;
     if (!b) {
@@ -357,47 +379,45 @@ const thinking_signature = {
     } else if (b.skip) {
       features.push('Step②：站点未配置官方 Key，跳过真实性核验（不计入总分）');
       if (isKiro) { diffs.push('Kiro 渠道出现思考签名且未配置官方Key核验，大概率是渠道伪装签名，建议人工核查'); verdictCap = '存疑'; }
-    } else if (!b.ok) {
+    } else if (!b.ok && !b.verdict) {
       features.push(`Step②：官方请求失败(${b.error || '未知错误'}) → 无法判断，不改动分数`);
     } else {
-      const bParsed = parseJsonLoose(b.body || '');
-      const bJson = bParsed.ok ? bParsed.value : null;
-      const bText = `${b.body || ''} ${JSON.stringify(bJson || {})}`.toLowerCase();
-      const officialRejectedSig = b.httpStatus >= 400 && SIG_REJECT_RE.test(bText);
-      const officialConfirmed = bJson && hasClearThinkingEdit(bJson);
-      const officialAccepted = b.httpStatus >= 200 && b.httpStatus < 300 && bJson && !isAnthropicError(bJson);
-      if (officialRejectedSig) {
+      const ov = b.verdict || 'unknown';
+      const why = b.reason || '';
+      if (ov === 'fake') {
         score = 0; severity = 'critical';
-        diffs.push(`Step②：官方明确拒绝该签名（疑似签名校验失败）→ 坐实伪造：${(b.body || '').slice(0, 120)}`);
-      } else if (officialConfirmed) {
-        if (isKiro) {
-          verdictCap = '存疑';
-          diffs.push('Kiro 渠道出现的思考签名已命中官方 clear_thinking_20251015 确认标记，但仍建议人工复核（Kiro 官方不应有此字段）');
-        } else {
-          score = 100;
-          features.push('Step②：命中官方 context_management.clear_thinking_20251015 确认标记 → 官方明确识别并处理了该签名（无法伪造的强证据）→ 分数上修为 100');
-        }
-      } else if (officialAccepted) {
+        diffs.push(`Step②：${why} → 坐实伪造`);
+      } else if (ov === 'real') {
         if (isKiro) {
           verdictCap = '存疑';
           diffs.push('Kiro 渠道出现的思考签名已通过官方核验，但仍建议人工复核（Kiro 官方不应有此字段）');
         } else {
           score = 100;
-          features.push('Step②：官方接受该签名未报错（未见 clear_thinking_20251015 标记，可能因模型/版本不返回该字段）→ 分数上修为 100');
+          features.push(`Step②：${why} → 分数上修为 100`);
         }
+      } else if (ov === 'inconclusive') {
+        // 官方虽然返回成功，但迹象表明思考块被剥离、签名并未真正校验——不能当验真依据。
+        features.push(`Step②：${why}（不改动分数）`);
+        if (isKiro) diffs.push('Kiro 渠道出现思考签名且官方核验未能真正验签，大概率是渠道伪装签名，建议人工核查');
       } else {
-        features.push(`Step②：官方请求失败但非签名相关原因（HTTP ${b.httpStatus}）→ 无法判断，不改动分数`);
+        features.push(`Step②：${why || `官方核验未能完成（HTTP ${b.httpStatus ?? 0}）`} → 无法判断，不改动分数`);
         if (isKiro) diffs.push('Kiro 渠道出现思考签名且未能通过官方核验确认真伪，大概率是渠道伪装签名，建议人工核查');
       }
     }
 
     // Step③：伪造签名对照（当前渠道是否校验签名）
+    // 给当前渠道发一个与真签名等长的随机伪造签名：真实上游会拒绝篡改过的签名，
+    // 所以「放过伪造签名」是有效的负面信号（可能只转发不校验，或并非真实 Claude 渠道）。
+    const SIG_REJECT_RE = /(signature|thinking|签名|思考)[\s\S]{0,60}?(invalid|mismatch|tamper|unrecognized|verif|failed|无效|不匹配|篡改|校验)|(invalid|mismatch|tamper|unrecognized|verif|failed|无效|不匹配|篡改|校验)[\s\S]{0,60}?(signature|thinking|签名|思考)/i;
     const c = ctx.sigVerifyC;
     if (c) {
       const cText = `${c.body || ''} ${JSON.stringify(c.json || {})}`.toLowerCase();
       const channelRejectedFake = c.httpStatus >= 400 && SIG_REJECT_RE.test(cText);
       const channelConfirmedFake = c.json && hasClearThinkingEdit(c.json);
       const channelAcceptedFake = c.httpStatus >= 200 && c.httpStatus < 300;
+      // 注：这里不再用 input_tokens 反推「签名有没有被校验」——上游可以先验签再把思考内容
+      // 丢掉不计费，小 input_tokens 同样已经验过签，拿它当闸门会放过真正没校验的渠道。
+      const cInTok = c.json?.usage?.input_tokens ?? 0;
       if (channelRejectedFake) {
         features.push('Step③：当前渠道拒绝了伪造签名 → 渠道确实执行了签名校验 ✓');
       } else if (channelConfirmedFake) {
@@ -407,7 +427,7 @@ const thinking_signature = {
         score = 0; severity = 'critical';
         diffs.push('Step③：当前渠道对伪造签名仍返回 clear_thinking_20251015 确认标记 → 伪造串在原理上不可能通过真实校验，坐实并非真实签名校验（非真实 Claude 渠道，或上游从不校验签名）');
       } else if (channelAcceptedFake) {
-        diffs.push('Step③：当前渠道未校验伪造签名，正常返回 → 存疑：可能上游忽略了 signature 字段做转发，也可能并非真实 Claude 渠道');
+        diffs.push(`Step③：当前渠道放过了伪造签名（HTTP ${c.httpStatus}，input_tokens ${cInTok}）→ 存疑：真实上游会拒绝篡改过的签名，这里未拒说明可能忽略了 signature 字段做转发，也可能并非真实 Claude 渠道`);
         verdictCap = verdictCap || '存疑';
       } else {
         features.push(`Step③：请求失败但非签名校验问题（HTTP ${c.httpStatus}）→ 无法判断渠道是否校验签名`);

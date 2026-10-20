@@ -1,0 +1,81 @@
+@charset "utf-8";
+/* admin.css —— 指纹采集台专属样式（基础样式在 styles.css） */
+.muted, .muted-p { color: var(--ink-faint); font-size: 13px; }
+.muted-p { margin: -4px 0 14px; }
+.login-wrap { display: flex; justify-content: center; padding-top: 70px; }
+.login-card { width: 100%; max-width: 420px; }
+
+.tabs { display: flex; gap: 6px; margin: 22px 0 4px; border-bottom: 1px solid var(--line); }
+.tab { font: inherit; font-size: 14px; font-weight: 600; color: var(--ink-soft); background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; cursor: pointer; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; }
+.tab.on { color: var(--ink); border-bottom-color: var(--claude); }
+.badge { font-family: var(--mono); font-size: 11px; background: var(--paper-2); border: 1px solid var(--line); border-radius: 99px; padding: 0 7px; }
+
+.seg { display: inline-flex; background: var(--paper-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; width: fit-content; }
+.seg button { border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--ink-soft); padding: 6px 14px; border-radius: 7px; cursor: pointer; }
+.seg button.on { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(20,17,12,.12); }
+
+/* 12 环境 × 3 条 */
+.env-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.env { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--paper); }
+.env-name { font-size: 12.5px; font-weight: 700; display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.env-name span { font-family: var(--mono); font-weight: 400; color: var(--ink-faint); font-size: 11px; }
+.env-cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.cell { border-radius: 8px; border: 1px solid var(--line); background: var(--card); padding: 6px 8px; font-size: 11px; font-family: var(--mono); min-height: 46px; display: flex; flex-direction: column; justify-content: space-between; gap: 3px; overflow: hidden; }
+.cell .st { font-weight: 700; font-size: 11.5px; }
+.cell .bar { height: 3px; border-radius: 99px; background: var(--line-soft); overflow: hidden; }
+.cell .bar i { display: block; height: 100%; width: 0; background: var(--claude); }
+.cell.running { border-color: var(--claude); } .cell.running .st { color: var(--claude); }
+.cell.done { background: var(--ok-soft); border-color: #c4e3d0; } .cell.done .st { color: var(--ok); } .cell.done .bar i { width: 100%; background: var(--ok); }
+.cell.failed { background: var(--warn-soft); border-color: #eedcb2; } .cell.failed .st { color: var(--warn); }
+.cell.fatal { background: var(--bad-soft); border-color: #f0c9c9; } .cell.fatal .st { color: var(--bad); }
+
+.save-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+
+/* 档案表 */
+.filter { font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); min-width: 220px; outline: none; }
+.atable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.atable th { text-align: left; font-size: 11.5px; color: var(--ink-faint); font-weight: 600; letter-spacing: .03em; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.atable td { padding: 10px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.atable tr:hover td { background: var(--paper); }
+.atable .mono { font-size: 12px; }
+.atable .sub { font-size: 11.5px; color: var(--ink-faint); }
+.vtag { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+.vtag.match { background: var(--ok-soft); color: var(--ok); } .vtag.mismatch { background: var(--bad-soft); color: var(--bad); }
+.vtag.split, .vtag.inconclusive { background: var(--warn-soft); color: var(--warn); } .vtag.unknown { background: var(--paper-2); color: var(--ink-faint); }
+.kind { font-size: 11px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line); color: var(--ink-soft); white-space: nowrap; }
+.kind.official { border-color: #c4e3d0; color: var(--ok); background: var(--ok-soft); }
+.minibar { width: 90px; height: 6px; border-radius: 99px; background: var(--paper-2); overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.minibar i { display: block; height: 100%; border-radius: 99px; }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.table-wrap { overflow-x: auto; }
+
+.cand { display: grid; grid-template-columns: 24px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr) minmax(0, .8fr); gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.cand input[type=text] { font: inherit; font-family: var(--mono); font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); width: 100%; }
+/* 「待并入」列表复用 .cand 的输入框样式，但没有勾选框那一列，
+   换成「档案名 | 模型 id | 家族 id | 家族名 | 移除」五列。 */
+.cand-import { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr) minmax(0, .8fr) auto; }
+.cand-import { display: grid; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.cand-import input[type=text] { font: inherit; font-family: var(--mono); font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); width: 100%; }
+.bank-models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* ---------- 指纹库：模型芯片（可移除） ---------- */
+/* 每个模型芯片右上角一个 ✕。为什么把删除做在芯片上而不是单独列一张表：
+   库的模型就 18 个上下，芯片已经是它的可视化，再补一张管理表反而是两处要同步。 */
+.chip { position: relative; padding-right: 26px; }
+.chip-x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; padding: 0; line-height: 1;
+  border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink-faint);
+  font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.chip-x:hover { border-color: var(--bad); color: var(--bad); background: var(--bad-soft, #fdeceb); }
+/* 已从本次重建中移除的模型：划掉并变灰，↺ 可恢复 */
+.chip-off { opacity: .5; text-decoration: line-through; border-style: dashed; }
+.chip-off .chip-x { text-decoration: none; }
+
+.cv-table { font-size: 13px; margin-top: 10px; border-collapse: collapse; }
+.cv-table td, .cv-table th { padding: 4px 14px 4px 0; text-align: left; }
+.cv-table th { font-size: 11.5px; color: var(--ink-faint); font-weight: 600; }
+
+@media (max-width: 640px) {
+  .cand { grid-template-columns: 24px 1fr; }
+  .cand > :nth-child(n+3) { grid-column: 2; }
+  .tabs { overflow-x: auto; }
+}

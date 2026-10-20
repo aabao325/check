@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>大模型归因检测 — 中转站背后到底是哪个模型 · Aabao.AI 工具箱</title>
+<meta name="description" content="填 Base URL、API Key 和模型名，让模型凭第一反应写约 300 个数字，用数字指纹与 18 个官方基准比对，判断中转站有没有偷换模型。浏览器本地直连，Key 不经服务器。">
+<meta name="robots" content="index, follow">
+<link rel="icon" type="image/svg+xml" href="../og-cover.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./assets/styles.css?v=13">
+</head>
+<body>
+<div class="shell">
+  <nav>
+    <div class="wrap nav-inner">
+      <a class="brand" href="../">
+        <svg class="glyph" viewBox="0 0 200 200" fill="none" role="img" aria-label="Aabao.AI"><defs><linearGradient id="navg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4285F4"/><stop offset="33%" stop-color="#9B72CB"/><stop offset="66%" stop-color="#EA4986"/><stop offset="100%" stop-color="#FF8A3D"/></linearGradient></defs><rect x="22" y="22" width="156" height="156" rx="48" fill="none" stroke="url(#navg)" stroke-width="13"/><circle cx="72" cy="100" r="18" fill="url(#navg)"/><circle cx="128" cy="100" r="18" fill="url(#navg)"/></svg>
+        <span class="brand-name">Aabao.AI</span>
+      </a>
+      <div class="nav-links">
+        <a href="../">首页</a>
+        <div class="nav-links-item" id="modelDrop">
+          <button type="button" class="nav-drop-btn" id="modelDropBtn" aria-haspopup="true" aria-expanded="false">
+            大模型检测
+            <svg class="dc-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap">
+      <span class="eyebrow"><span class="pip"></span> 凭第一反应写 300 个数字，认出背后是哪个模型</span>
+      <h1>大模型<span class="accent">归因检测</span></h1>
+      <p>模型「随手写数字」时并不随机——每个模型都有自己稳定的偏好，像指纹一样。让中转站背后的模型写三组数字，与官方基准比对，就能看出它是不是你买的那个模型。</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+  <!-- 右侧悬浮栏：配置库 + 检测历史，与 check 检测站同一套交互（窗口不够宽时降级为正文内联卡片） -->
+  <div class="side-rail" id="sideRail">
+
+    <!-- 配置库：把「中转站 + Key + 模型」存成一条命名配置，定期复检一键导入 -->
+    <aside class="cfg-store" id="cfgStore" aria-label="配置库">
+      <button class="cfg-store-head" id="cfgToggle" aria-expanded="true">
+        <span class="cfg-store-title">🗂️ 配置库</span>
+        <span class="cfg-caret">▾</span>
+      </button>
+      <div class="cfg-store-body" id="cfgBody">
+        <div class="cfg-saved" id="cfgSaved"></div>
+        <div class="cfg-save-row">
+          <input id="cfgLabel" maxlength="40" placeholder="备注标签（如：中转站A）" autocomplete="off">
+          <button class="btn btn-accent btn-sm" id="cfgSaveBtn">💾 保存当前</button>
+        </div>
+        <div class="cfg-store-tip">仅存于本机浏览器 · 不会上传云端</div>
+      </div>
+    </aside>
+
+    <!-- 检测历史：每跑完一次归因自动存一条快照，点开可看完整结果并一键分享 -->
+    <aside class="history-store" id="historyStore" aria-label="检测历史">
+      <button class="cfg-store-head" id="historyToggle" aria-expanded="true">
+        <span class="cfg-store-title">🕘 检测历史<span class="muted" id="historyCount"></span></span>
+        <span class="cfg-caret">▾</span>
+      </button>
+      <div class="cfg-store-body" id="historyBody">
+        <div class="history-list" id="historyList"></div>
+        <button class="btn btn-ghost btn-sm history-clear" id="historyClearBtn" style="display:none">🗑 清空全部历史</button>
+        <div class="cfg-store-tip">检测完自动记录 · 最多保留 30 条</div>
+      </div>
+    </aside>
+
+  </div><!-- /#sideRail -->
+
+    <!-- ① 配置 -->
+    <section class="section">
+      <div class="sec-title"><span class="n">1</span>填写接口<span class="sub">选接口路径 · 不同路径的请求体与字段各不相同</span></div>
+      <div class="panel">
+        <div class="cfg-grid">
+          <div class="field full">
+            <label for="baseUrl">接口地址 <span class="tip">只填基础地址，右侧选接口路径</span></label>
+            <div class="ep-group">
+              <input id="baseUrl" type="text" placeholder="https://你的中转站" autocomplete="off" spellcheck="false">
+              <select id="apiPath" aria-label="接口路径"></select>
+            </div>
+            <div id="customPathRow" hidden style="margin-top:8px">
+              <input id="customPath" type="text" placeholder="/v1/chat/completions 或完整地址 https://.../v1/xxx" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="cfg-note" id="pathHint" style="margin-top:7px"></div>
+          </div>
+          <div class="field">
+            <label for="apiKey">API Key</label>
+            <input id="apiKey" type="password" placeholder="sk-...（默认不保存；可在右侧「配置库」一键存到本地浏览器，方便定期复检）" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="field">
+            <label for="model">模型名 <span class="tip">必须是指纹库已收录的模型</span></label>
+            <input id="model" type="text" placeholder="如 claude-opus-5 / gpt-5.5" autocomplete="off" spellcheck="false">
+            <div class="model-hint" id="modelHint" aria-live="polite"></div>
+          </div>
+        </div>
+        <div id="rejectBox" hidden></div>
+        <div class="run-row">
+          <button class="btn btn-accent" id="runBtn" type="button">开始归因</button>
+          <button class="btn btn-ghost" id="stopBtn" type="button" hidden>停止</button>
+          <button class="btn btn-ghost" id="shareBtn" type="button" disabled>🔗 分享报告</button>
+          <span class="cfg-note" style="margin:0">约 3~6 次请求，每次输出约 1~2k token。</span>
+        </div>
+        <div class="cfg-note">请求由你的浏览器<b>直接</b>发往目标接口，Key 不经过本站服务器；只有目标站未开放跨域（CORS）时，才会改走本站的流式中转（只转发、不落盘）。三份回答<b>并行</b>发出，整体耗时约等于最慢的那一份。<br>
+          分享是唯一会上传的环节：点「分享报告」并确认后，这份归因结果才会存到本站服务器换一个短链，中转站地址默认<b>只留域名</b>、由你当场决定。</div>
+      </div>
+    </section>
+
+    <!-- ② 进度 -->
+    <section class="section" id="progSection" hidden>
+      <div class="sec-title"><span class="n">2</span>采集回答<span class="sub">目标 3 份有效回答，最多尝试 6 次</span></div>
+      <div class="panel">
+        <div class="prog-head">
+          <div class="prog-stats" id="progStats"></div>
+        </div>
+        <div class="slots" id="slots"></div>
+        <div id="fatalBox" hidden></div>
+      </div>
+    </section>
+
+    <!-- ③ 结果 -->
+    <section class="section" id="resultSection" hidden>
+      <div class="sec-title"><span class="n">3</span>归因结果<span class="sub">与官方基准对比</span></div>
+      <div class="verdict" id="verdict"></div>
+      <div class="v-foot" id="verdictFoot"></div>
+      <div class="viz" id="vizOverlay"></div>
+      <div class="viz" id="vizCompass"></div>
+      <div class="diag" id="diag"></div>
+    </section>
+
+    <!-- ④ 检测说明 -->
+    <section class="section" id="docs">
+      <div class="sec-title"><span class="n">i</span>检测说明<span class="sub">原理 · 注意事项 · 支持的模型</span></div>
+      <div class="panel doc">
+        <h3>原理</h3>
+        <p>让模型「凭第一反应」写出约 300 个 1~355 的整数。模型不是真随机源：它偏爱哪些数字、在序列哪个位置偏大偏小，由权重决定，稳定可复现，而且各模型偏法不同。程序把三份回答的<b>数字分布形状</b>（权重 75%）与<b>排列顺序特征</b>（权重 25%）和指纹库里每个模型的基准比对，扣除「语言 / 系统提示词 / 上下文长度」带来的环境干扰后，经交叉验证校准成概率。</p>
+
+        <h3>注意事项</h3>
+        <div class="callout"><p><b>系统提示词会显著改变数字偏好。</b>中转站若在你的请求里偷偷注入系统提示词（角色设定、工具说明、长篇规则），数字分布会被推离官方基准，结果可能被误判成「存疑」甚至「被替换」。指纹库在建库时已用 12 种环境（含 96 / 512 / 2048 词的系统提示与用户前缀）估计并扣除了这类干扰，但只能削弱、不能完全消除。<b>不要在 Claude Code、Cursor 等自带长系统提示的客户端里测</b>——原作者实测这类环境偏差很大。</p></div>
+        <ul>
+          <li><b>只支持指纹库里的模型。</b>归因是「在已知模型里找最像的」：库外模型也会被硬塞给最像的那个，而且概率看起来很自信。所以库外模型会被直接拒绝，不发请求。</li>
+          <li><b>这是统计推断，不是证据。</b>结论受模型版本更新、服务端参数、样本量影响，不能作为退款或纠纷的依据。结果异常时建议换个时间段复测。</li>
+          <li><b>三份回答要「异口同声」。</b>若各份回答分别像不同模型，即使合并概率很高也会判为「分歧」——这常见于多模型轮询 / 混合路由。</li>
+          <li><b>思考 / 推理档位</b>（如 <code>-thinking</code>、<code>-high</code> 后缀）会按基础模型比对，但档位本身会改变输出偏好，结论打折看。</li>
+          <li><b>不设置 temperature</b>，使用供应商默认值——与指纹库采集时的口径一致。</li>
+          <li><b>探针每次随机生成</b>（句式、数字个数都不同），避免中转站识别固定提示词后专门走真模型。拒答、被截断或数字不足的回答不计入。</li>
+          <li><b>基准来源：</b>各模型的指纹由本站管理员用官方直连渠道采集录入指纹库。如你认为某个模型的指纹采集有误，或愿意提供指纹数据，欢迎联系本站管理员。</li>
+        </ul>
+
+        <h3>支持的模型</h3>
+        <p>以下模型已有官方基准；不在列表里的模型暂不支持检测。点模型名可直接填入上方输入框。</p>
+        <details class="models" id="modelsBox">
+          <summary><span>指纹库已收录 <span id="modelCount">—</span> 个模型 <span class="muted" id="bankMeta"></span></span><span class="caret">▾</span></summary>
+          <div class="models-body" id="modelsBody"><p class="muted">加载中…</p></div>
+        </details>
+
+        <h3>致谢</h3>
+        <p>归因算法与初始指纹库来自开源项目 <a href="https://github.com/xqy2006/ModelTrace" target="_blank" rel="noopener">xqy2006/ModelTrace</a>（MIT License），本站移植到浏览器端并与原版逐位对拍；「用随机数偏好识别渠道」的思路最早见于 <a href="https://github.com/hanlinwenyuan/hlwy-ai-checker" target="_blank" rel="noopener">hanlinwenyuan/hlwy-ai-checker</a>。</p>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="wrap">Aabao.AI 工具箱 · 检测在你的浏览器本地完成 · <a href="../check/">真伪检测</a> · <a href="../iq/">智商检测</a> · <a href="./admin.html">指纹采集台</a> · <a href="https://github.com/aabao325/check" target="_blank" rel="noopener">⭐ 开源仓库</a></div></footer>
+</div>
+
+<!-- 历史详情 / 分享报告弹窗：同一份骨架复用于两种场景，
+     内容由 app.js 的 renderSnapshotCard() 现场渲染（只读、不重新请求）。
+     ⚠️ 不要在这里写 aria-hidden="true"：`hidden` 已经让它从无障碍树与布局里消失，
+     再叠一层 aria-hidden，恰好又碰上「关闭那一刻焦点还在里面的按钮上」，浏览器就会报
+     「Blocked aria-hidden on an element because its descendant retained focus」。
+     隐藏用 hidden 一个属性就够；app.js 的 closeModal 会先把焦点移出再隐藏。 -->
+<div class="detail-overlay" id="detailModal" hidden>
+  <div class="detail-modal" role="dialog" aria-modal="true" aria-label="归因结果详情">
+    <div class="detail-head">
+      <span class="detail-title" id="detailModalTitle">归因结果</span>
+      <button class="detail-close" id="detailModalClose" aria-label="关闭">✕</button>
+    </div>
+    <div class="detail-body" id="detailModalBody"></div>
+    <div class="detail-foot" id="detailModalActions"></div>
+  </div>
+</div>
+
+<script src="../nav-drop.js"></script>
+<script src="../check/assets/qrcode.min.js?v=13"></script>
+<!-- html2canvas 用于弹窗里导出 PNG。**自托管**而不是走 CDN：
+     ① 隐私浏览器（Brave / Firefox 严格模式 / Safari ITP）会拦掉三方脚本对存储的访问，
+        控制台里一屏「Tracking Prevention blocked access to storage for cdn.jsdelivr.net/...」，
+        虽然不影响功能，但把真正的错误淹掉了；
+     ② 少一个外部依赖就少一个「导出按钮点了没反应」的失败点。
+     加载失败时导出按钮会给出提示，不影响检测。 -->
+<script src="./assets/vendor/html2canvas.min.js?v=13"></script>
+<script type="module" src="./assets/app.js?v=13"></script>
+<script>
+  if (window.initModelDrop) window.initModelDrop('modelDrop', 'modelDropBtn', { pathPrefix: '../', current: '归因检测', iconBase: '../check/assets/icons/' });
+</script>
+</body>
+</html>

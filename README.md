@@ -1,281 +1,165 @@
-<div align="right">
+# 🧪 大模型检测站
 
-**简体中文** | [English](./README_EN.md)
+三个独立的大模型检测工具，从不同角度回答同一个问题：**你正在用的这个「模型」，到底是不是你以为的那个？**
 
-</div>
+每个站都能单独部署、单独使用；放在同一个仓库里，是为了共用一套视觉、一套导航和一套部署说明。
 
-<div align="center">
-
-# 🛡️ 御三家 API 真伪检测站
-
-### 一键鉴别 Claude / OpenAI / Gemini 中转站真伪
-
-掺假冒充、协议篡改、能力降级、隐藏提示词注入 —— 逐项可见、有理有据。
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![PHP](https://img.shields.io/badge/PHP-7.4%2B-777BB4.svg)](https://www.php.net/)
-[![Frontend](https://img.shields.io/badge/Frontend-Vanilla%20JS%20(ESM)-f7df1e.svg)](#-技术栈)
-[![No Build](https://img.shields.io/badge/Build-Zero%20config-success.svg)](#-快速开始)
-
-</div>
+<p>
+  <a href="https://github.com/aabao325/check"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
+  <img alt="PHP" src="https://img.shields.io/badge/PHP-7.4%2B-777BB4.svg">
+  <img alt="Frontend" src="https://img.shields.io/badge/Frontend-Vanilla%20JS%20(ESM)-f7df1e.svg">
+  <img alt="Build" src="https://img.shields.io/badge/Build-Zero%20config-success.svg">
+</p>
 
 ---
 
-## 📖 这是什么
+## 📖 三个站分别做什么
 
-很多人用「中转站 / 镜像站 / API 聚合」来访问 Claude、OpenAI、Gemini，但你很难知道对方给你的到底是：
+| 目录 | 检测什么 | 靠什么判断 | 详细说明 |
+| --- | --- | --- | --- |
+| [`check/`](./check/) | **API 中转站真伪**：掺假冒充、协议篡改、能力降级、隐藏提示词注入 | 23 项 Claude 探针 + 6 项 OpenAI / Gemini 探针，交叉验证后加权评分 | [README](./check/README.md) |
+| [`iq/`](./iq/) | **模型是否降智**：同一道题，旗舰模型与便宜小模型画得出来吗 | 让模型用 SVG 画动画，与标准答案左右对比，再由视觉模型点评差在哪 | — |
+| [`modeltrace/`](./modeltrace/) | **背后究竟是哪个模型**：中转站有没有偷偷换成别的 | 让模型写约 300 个随机数，与各模型官方基准做数字指纹归因 | [README](./modeltrace/README.md) |
 
-- **真模型** 还是 **便宜小模型冒充**（例如拿 GPT-3.5 假装 Claude Opus）；
-- 是否在 **篡改协议**（剥离工具调用、伪造思考链、吞掉系统提示）；
-- 是否在 **token 计费上造假**；
-- 是否在你的请求里 **偷偷注入隐藏提示词**。
+**它们的边界：**
 
-本项目是一个**开源的、在浏览器本地运行**的检测站：填入你的中转站地址、Key、模型名，一键发起一整套探针请求，从**渠道来源、密码学签名、协议结构、推理智商、token 计费**等多个维度交叉验证，最终给出**加权评分 + 真伪判定 + 人话报告**，并支持**生成可分享的链接 / PNG 图片**。
+- `check` 查的是「**这个渠道**有没有骗你」—— 协议、计费、签名、注入，偏证据链；
+- `iq` 查的是「**这个模型**现在还够不够聪明」—— 偏能力体感；
+- `modeltrace` 查的是「**这个模型**到底是谁」—— 偏身份归因。
 
-> 🔒 **隐私优先**：所有特征判定逻辑**全部前端开源、在你本地运行**。我们**不在云端保存你的 API Key 或检测数据**，请求记录仅存于你本地浏览器。后端 PHP 仅做一次性请求转发以绕过浏览器跨域限制，**不落库**；只有当你**主动点「分享报告」**时，报告才会上传以生成短链。
-
----
-
-## ✨ 核心特性
-
-| 特性 | 说明 |
-| --- | --- |
-| 🎯 **御三家全覆盖** | 同一界面检测 Claude（Anthropic）/ OpenAI / Gemini 三种协议 |
-| ⭐ **思考签名验证** | 校验 Claude 思考链的**服务端密码学签名**（中转站无法伪造）—— 最强证据 |
-| 🧬 **协议污染检测** | OpenAI 端响应里若混入 `claude_*` 等字段，直接判定套壳冒充 |
-| 🧠 **推理智商题库** | 12 道精选中文逻辑/陷阱题，区分真旗舰与便宜小模型蒙混 |
-| 💉 **隐藏提示词注入检测** | 故意不发 system，让模型自爆中转层偷偷塞进来的系统提示 |
-| 💰 **Token 计费核对** | 长短请求增量比对，可选接官方 `count_tokens` 精确核验 |
-| 📊 **加权评分 + 硬否决** | 多维加权打分；命中严重异常（CRITICAL）直接封顶评级 |
-| 🛠️ **自动 / 手动双模式** | 自动跑全套探针，或手动粘贴响应 JSON 做特征识别（内置特征识别的迷你 Apifox） |
-| 🤖 **AI 人话总结** | 可接入智谱 GLM 生成简明中文结论（未配置则回退本地规则） |
-| 🔗 **一键分享报告** | 生成短链或静态链接，报告页支持导出带品牌水印的 PNG |
+三者结论可以互相印证：比如 `check` 显示签名异常、`modeltrace` 指向另一个模型，基本可以确定被换过。
 
 ---
 
-## 🔬 检测原理
+## 🔒 隐私口径（三个站一致）
 
-检测站通过**主动发起探针请求 + 被动解析响应特征**两类手段，对响应进行多维度交叉验证：
-
-| 维度 | 原理 |
-| --- | --- |
-| **渠道识别** | 看响应 `id` 前缀：`msg_` = Anthropic 直连、`msg_bdrk_` = AWS Bedrock、`msg_vrtx_` = Google Vertex（均为真 Claude）；出现 `chatcmpl-` = 疑似 OpenAI 套壳 ⚠️ |
-| **思考签名**（最强） | 真 Claude 的思考链带服务端密码学签名 `signature`，长且为合法 base64，**中转站无法伪造** |
-| **协议污染** | OpenAI 端响应的 `usage` 里若出现 `claude_*` / Gemini 计数字段 = 套壳冒充 |
-| **结构与规范** | 校验 `id` / `type` / `stop_reason` / `usage` 等字段是否符合官方 schema，工具 id 是否为 `toolu_` 前缀 |
-| **能力一致性** | 同一请求多次发送，比对模型名稳定性与输出 token 方差（变异系数 CV），识别「轮询多模型」 |
-| **智商与知识** | 逻辑陷阱题 + Anthropic 事实题，识别便宜小模型冒充旗舰 |
-| **计费真实性** | 长短 prompt 的 token 增量是否合理；可选与官方 `count_tokens` 精确比对 |
-| **流式真实性** | 校验 SSE 事件顺序（`message_start` 起、`message_stop` 止）、流式/非流式结果一致性 |
-| **缓存行为** | 两轮同请求是否出现「创建→命中」的官方 prompt caching 行为 |
-
-> **打分逻辑**：各探针按权重加权平均得到综合分。评级分四档 —— **高度可信 (≥85) / 基本可信 (≥70) / 存疑 (≥50) / 不可信 (<50)**。一旦命中**严重异常（CRITICAL）**（如 id 前缀套壳、思考签名缺失、身份冒充、隐藏提示词注入），评级最高只能为「存疑」，实行**硬否决封顶**。
+- **请求由你的浏览器直连目标接口**，API Key 不经过本站服务器；后端 PHP 只做两件事：绕 CORS 转发、存分享报告。
+- **检测历史只存在你本机浏览器**（localStorage），换设备看不到。
+- **只有你主动点「分享报告」并确认**，报告的脱敏快照才会存到服务器以生成短链；中转站地址默认只保留域名。
 
 ---
 
-## 🧪 检测项一览
-
-### 🟠 Claude（Anthropic）—— 23 项探针
-
-| 探针 | 权重 | 档位 | 说明 |
-| --- | :---: | :---: | --- |
-| 渠道来源识别 | 5 | Q/S/F | 按 `id` 前缀判定渠道来源 |
-| 身份识别 | 5 | Q/S/F | 问「你是谁」，检查是否暴露竞品身份或被换弱模型 |
-| **思考签名验证 ⭐** | **25** | Q/S/F | 验证思考链密码学签名（最强证据，无法伪造） |
-| 消息 ID 规范 | 5 | Q/S/F | `id` / `tool_use.id` 等是否符合官方格式 |
-| 协议规范 | 5 | Q/S/F | 响应结构 / `usage` 新结构是否合法 |
-| 一致性（模型/稳定性） | 10 | Q/S/F | 多次请求模型名稳定、输出方差合理 |
-| 结构化输出（tool_use） | 12 | S/F | 强制工具调用，校验结构化结果与 `toolu_` id |
-| 结构化输出（JSON Schema） | 10 | S/F | 按复杂 JSON Schema 输出并校验字段合规 |
-| 工具调用+复杂Schema+SSE | 10 | S/F | 工具 + 复杂 Schema + 流式三合一 |
-| 流式事件顺序 | 6 | S/F | 校验 SSE 事件序列与顺序 |
-| 行为指纹 | 15 | S/F | 加粗/列表等典型表现是否符合官方 |
-| 推理/智商题 | 10 | S/F | 12 道中文逻辑陷阱题 |
-| 知识准确度 | 10 | S/F | Anthropic 相关事实题 |
-| 系统提示词遵从 | 8 | S/F | system 指令是否被中转层吞掉 |
-| **隐藏提示词注入** | 12 | S/F | 检测中转层是否偷偷注入系统提示 |
-| 多轮对话记忆 | 6 | S/F | 历史上下文是否完整透传 |
-| 联网搜索能力 | 8 | S/F | 官方 web_search 结构是否完整 |
-| 多模态（PDF/图片） | 8 | S/F | 是否真正具备图片理解能力 |
-| 流式/非流式一致 | 5 | S/F | 两种模式结果是否一致 |
-| Prompt 缓存行为 | 8 | S/F | 两轮请求是否「创建→命中」缓存 |
-| Token 计费 | 10 | S/F | 长短请求 token 增量是否合理 |
-| 错误参数报错 | 5 | S/F | 非法参数是否返回标准 Anthropic 错误结构 |
-| 长上下文真实性 | 15 | F | 大文本暗号回捞（防上下文截断） |
-
-### 🔵 OpenAI —— 6 项探针
-
-基础可用 · 模型一致性（防掺假） · **协议规范 + 污染检测** · 函数调用 · 结构化输出 · Token 计费
-
-### 🟢 Gemini —— 6 项探针
-
-基础可用 · 模型一致性 · 协议规范 · 函数调用 · 结构化输出 · Token 计费
-
-> 不同检测深度运行不同数量的探针：**快速 (Q)** 只跑最核心几项、**标准 (S)** 覆盖绝大多数、**完整 (F)** 额外加上耗时较高的长上下文真实性等。深度越高越准，但耗费的 token 也越多。
-
----
-
-## 🏗️ 架构与目录
+## 🏗️ 目录结构
 
 ```
-check/
-├── index.html              # 主界面（自动检测 / 手动检测 双视图）
-├── report.html             # 可分享的报告页
-├── assets/
-│   ├── app.css             # 样式
-│   ├── app.js              # 主运行器：串起协议 / 探针 / UI / 打分 / 分享
-│   ├── core.js             # 通用引擎：代理请求 / SSE 解析 / Schema 校验 / 打分 / 导出
-│   ├── report.js           # 报告页渲染
-│   ├── icons/              # 各协议图标（svg）
-│   └── protocols/
-│       ├── anthropic.js    # Claude 协议探针集（23 个）
-│       ├── openai.js       # OpenAI 协议探针集（6 个）
-│       └── gemini.js       # Gemini 协议探针集（6 个）
-├── api/                    # 轻量 PHP 后端（仅转发，不落库）
-│   ├── _common.php         # ⚙️ 全部配置集中在此（Key / 品牌 / 超时）
-│   ├── probe.php           # 转发探针请求（绕过浏览器跨域）
-│   ├── summary.php         # 调用智谱 GLM 生成人话总结
-│   ├── share.php           # 保存 / 读取分享报告短链
-│   └── count.php           # （可选）官方 count_tokens 精确核对
-└── data/                   # 分享报告存储目录（需写权限）
+.
+├── index.html              # 总入口：三张卡片，进入各自的检测站
+├── nav-drop.js             # 三站共用的「大模型检测」下拉
+├── og-cover.svg            # favicon / 分享封面
+├── nginx-伪静态.conf        # 三个站共用的一份 Nginx 规则
+│
+├── check/                  # ① 真伪检测
+│   ├── index.html          #   主界面（自动 / 手动双视图）
+│   ├── report.html         #   可分享的报告页
+│   ├── api/                #   PHP：转发探针 / AI 总结 / 分享存取
+│   ├── assets/             #   样式、引擎、三协议探针集
+│   └── data/               #   分享报告（运行时生成，勿提交）
+│
+├── iq/                     # ② 智商检测
+│   ├── index.html          #   选题 → 检测 → 左右对比
+│   ├── iq-report.html      #   可分享的报告页
+│   ├── iq-assets/          #   前端逻辑 + 标准答案（baselines/）
+│   ├── iq-config.example.php
+│   ├── iq-proxy.php        #   CORS 兜底转发（不落盘）
+│   ├── iq-summary.php      #   视觉裁判（AI 总结）
+│   └── iq-share.php        #   分享报告存取
+│
+└── modeltrace/             # ③ 归因检测
+    ├── index.html          #   检测页
+    ├── report.html         #   可分享的报告页
+    ├── admin.html          #   指纹采集台（管理员，密码保护）
+    ├── api/                #   建档 / 分享 / 鉴权
+    ├── assets/engine/      #   指纹特征、归因、探针调度
+    ├── data/bank/          #   内置指纹基准库（随仓库发布）
+    └── data/runtime/       #   档案与会话（运行时生成，勿提交）
 ```
 
-**数据流**：浏览器前端 → `api/probe.php`（仅转发，绕过 CORS）→ 目标中转站 → 原样回传 → 前端本地解析、打分、渲染。Key 只在「你的浏览器 ↔ 转发代理」之间一次性使用，不写入任何数据库。
+---
+
+## 🚀 部署
+
+三站共用一套 PHP 环境，把整个仓库放到**站点根目录**即可。只想要其中一个，也可以单独把对应子目录放上去。
+
+### 步骤
+
+1. **建站**：宝塔 →【网站】→【添加站点】，PHP 选 **7.4 或以上**，站点根指向本仓库根目录。
+2. **装扩展**：`【软件商店】→ PHP →【安装扩展】`，安装 **curl**（必装）与 **openssl**。
+3. **填配置**：三个站各自复制一份模板为真实配置文件（模板本身不含任何密钥）：
+   ```bash
+   cp check/api/config.example.php      check/api/config.php
+   cp iq/iq-config.example.php          iq/iq-config.php
+   cp modeltrace/api/config.example.php modeltrace/api/config.php
+   ```
+   全部留空也能跑：`check` 的 AI 总结会回退成本地规则，`iq` 的 AI 总结按钮不可用，`modeltrace` 的采集台无法登录（前台检测不受影响）。
+4. **给写权限**：确保各站的数据目录对 PHP 可写（755，属主为运行用户）：
+   ```
+   check/data/          iq/data/          modeltrace/data/runtime/
+   ```
+5. **配伪静态**：把 [`nginx-伪静态.conf`](./nginx-伪静态.conf) 里 `server{}` 内的段落粘进【站点设置 → 伪静态】。
+   不配也能用，但**分享短链会退化成长链接**，且 `data/` 下的运行数据可能被直接下载。
+6. **申请 SSL**：Key 走网络，建议强制 HTTPS。
+7. **访问**：浏览器打开 `https://你的域名/`，从总入口进入三个站。
+
+### 只部署其中一个
+
+把对应的子目录当成站点根上传即可，此时：
+
+- `check/` 内部没有任何对上级目录的依赖，可独立运行；
+- `iq/` 与 `modeltrace/` 的导航下拉会去 `../nav-drop.js` 取脚本，缺了它只是**没有下拉菜单**，检测功能不受影响；
+- `modeltrace/` 复用 `../check/assets/qrcode.min.js` 生成二维码，缺了它报告页的二维码不显示，其余正常。
 
 ---
 
-## 🛠️ 技术栈
+## ⚙️ 配置要点
 
-- **前端**：原生 JavaScript（ES Modules），**零构建、零框架、零依赖**，浏览器直接运行。
-- **后端**：PHP 7.4+（仅 `curl` 转发与可选 GLM 调用），任意支持 PHP 的虚拟主机 / 宝塔即可部署。
-- **可选服务**：智谱 GLM（AI 人话总结）、Anthropic 官方 `count_tokens`（精确计费核对）、html2canvas（PNG 导出）。
+三个站的配置键不同，下面只列最容易踩的：
+
+| 文件 | 键 | 说明 |
+| --- | --- | --- |
+| `check/api/config.php` | `GLM_KEY` | 智谱 GLM，用于「生成 AI 总结」；留空回退本地规则 |
+| | `OFFICIAL_COUNT_KEY` | （可选）Anthropic 官方 key，用于精确核对 token 计费与思考签名回放核验 |
+| | `SITE_NAME` / `SITE_URL` | 分享报告页的品牌位与回链地址 |
+| `iq/iq-config.php` | `JUDGE_KEY` / `JUDGE_MODEL` | 视觉裁判模型，必须**支持读图**；留空则 AI 总结不可用 |
+| | `IQ_DATA_DIR` | 分享报告目录，留空用 `iq/data` |
+| `modeltrace/api/config.php` | `MT_ADMIN_PASSWORD_HASH` | 采集台口令的 bcrypt 哈希（不是明文）；留空则采集台无法登录 |
+| | `MT_DATA_DIR` | 运行时目录，留空用 `modeltrace/data/runtime` |
+
+> 生成哈希：`php -r "echo password_hash('你的密码', PASSWORD_DEFAULT), PHP_EOL;"`
+
+**配置文件一律不要提交。** 仓库的 `.gitignore` 已经排除了三个站的真实配置与数据目录；如果你新增了配置项，请同步更新对应的 `*.example.php`。
 
 ---
 
-## 🚀 快速开始
+## 🧪 测试
+
+三站的测试都是「不联网、不开浏览器」的纯本地测试，需要 Node 18+ 与 PHP 8：
 
 ```bash
-git clone https://github.com/aabao325/check.git
+# check：协议解析、特征识别、签名判据、UI 逻辑
+node check/tests/openai_signals.test.mjs
+node check/tests/sig_batch_ui.test.mjs
+php  check/tests/sig_verify_judge.test.php
+
+# modeltrace：指纹建库、归因引擎、传输层、分享接口
+node modeltrace/tests/bank_builder.test.mjs
+node modeltrace/tests/engine_parity.test.mjs
+node modeltrace/tests/transport_runner.test.mjs
+php  modeltrace/tests/share_api.test.php
 ```
 
-### 方式一：宝塔面板（推荐，全程图形界面）
-
-1. **建站**：宝塔 →【网站】→【添加站点】，PHP 版本选 **7.4 或以上**，把整个 `check/` 目录上传到站点根目录。
-2. **装扩展**：【软件商店】→ 你的 PHP →【安装扩展】，安装 **curl**（必装）与 **openssl**。
-3. **填配置**：编辑 `api/_common.php`（详见下方）。
-4. **给写权限**：把 `data/` 目录权限设为 **755**（属主可写），用于保存分享报告。
-5. **申请 SSL**：【SSL】→【Let's Encrypt】，建议开启强制 HTTPS（Key 走网络）。
-6. **访问**：浏览器打开 `https://你的域名/index.html`，右上角圆点变绿即为后端正常。
-7. **（可选）干净 URL**：想让分享链接不带 `.html`（如 `…/check/report?id=xxx` 而非 `…/report.html?id=xxx`），把仓库内 [`nginx-伪静态.conf`](./nginx-伪静态.conf) 的内容粘进【站点设置 →【伪静态】】保存即可。不配也能正常用，只是分享链接会带 `.html`。
-
-> 更详细的图文步骤见仓库内 [`部署说明.md`](./部署说明.md)。
-
-### 方式二：任意 PHP 环境
-
-将 `check/` 目录置于任意 PHP 7.4+ 站点根目录，确保 `curl` 扩展开启、`data/` 可写即可。本地自用可不开 HTTPS。
-
----
-
-## ⚙️ 配置说明
-
-打开 `api/_common.php`，修改顶部常量：
-
-```php
-// 智谱 GLM —— 用于「生成 AI 总结报告」。去 https://open.bigmodel.cn/ 申请（有免费额度）。
-// 留空也能用，AI 总结会回退成本地规则文字。
-const GLM_KEY   = 'sk-xxx';
-const GLM_MODEL = 'glm-4.7-flash';
-
-// （可选）Anthropic 官方 count_tokens 的 key，用于精确核对 token 计费造假；没有就留空。
-const OFFICIAL_COUNT_KEY = '';
-
-// 品牌广告位 —— 显示在分享报告页顶栏、页脚和导出的 PNG 水印上。
-const SITE_NAME   = '开源 AI 检测站';
-const SITE_URL    = 'https://your-site.example.com';
-const SITE_SLOGAN = '一键鉴别 Claude / OpenAI / Gemini 中转站真伪';
-```
-
-> 此外，前端 `assets/app.js` 顶部的 `REPO_URL` / `ISSUE_URL` 已配置为本仓库地址（用于页脚链接与「反馈题目」入口）；如需 fork 自用可改为你的仓库。
-
----
-
-## 📋 使用流程
-
-1. 顶部选择协议（**Claude / OpenAI / Gemini**）。
-2. 填写**接口地址、API Key、模型名**，选择检测深度（**快速 / 标准 / 完整**）。
-3. 点击「**🟢 开始检测**」，自动发起整套探针请求并逐项给出真伪判定。
-4. 每个检测项并排展示【请求体（可改）/ 响应体 / 特征 / 差异】，结果一目了然。
-5. 点「**🤖 生成 AI 总结**」得到人话报告；点「**🔗 分享报告**」生成可发给别人的链接。
-6. 分享报告页右上角可「**导出 PNG 图片**」（带品牌水印），适合发群。
-
-> 🛠️ **手动检测**：若你已有一段响应、不想自动发请求，可切到「手动检测」视图，直接粘贴响应 JSON 做特征识别 —— 等价于一个内置特征识别的迷你 Apifox。
-
----
-
-## ❓ 常见问题
-
-<details>
-<summary><b>右上角圆点显示「后端未连接」？</b></summary>
-
-`api/` 目录未上传，或 PHP 未安装 `curl` 扩展。先单独访问 `api/probe.php?action=ping`，正常应返回 `{"service":"ai-detector","ok":true,...}`；或访问 `api/probe.php?action=diag` 查看诊断。
-</details>
-
-<details>
-<summary><b>某检测项报「目标地址连接失败」？</b></summary>
-
-目标中转站可能拒绝服务器代理、地址写错、或超时。更换地址重试。
-</details>
-
-<details>
-<summary><b>AI 总结提示未配置？</b></summary>
-
-`api/_common.php` 里 `GLM_KEY` 还是 `sk-xxx`，填上真实的智谱 GLM key 即可。
-</details>
-
-<details>
-<summary><b>分享提示「静态链接」？</b></summary>
-
-`data/` 目录不可写。按部署步骤给 755 权限即可；不改也能用，只是分享网址较长（报告被压进了 URL hash）。
-</details>
-
-<details>
-<summary><b>我的 API Key 安全吗？</b></summary>
-
-Key 只在你本地浏览器与转发代理之间使用，<b>不写入任何数据库</b>。代理仅做一次性转发以绕过浏览器跨域限制。介意的话也可以用「手动检测」：完全不发请求，只分析你贴进来的响应。
-</details>
-
-<details>
-<summary><b>智商 / 推理题能新增吗？</b></summary>
-
-题库由站点统一维护、写死在代码里（不开放用户自行添加，以防被针对性「刷题」绕过）。但**非常欢迎反馈题目建议**，请到开源仓库提 Issue。
-</details>
-
----
-
-## 🔒 透明度声明
-
-- 本站特征判定逻辑**全部前端开源、本地运行**，**不保存你的 Key 与检测数据**。
-- 后端 PHP 仅做一次性请求转发（绕过浏览器跨域），**不落库**。
-- 仅当你**主动点「分享报告」**时，报告内容才会上传以生成短链。
-- 本站为开源项目，**不对检测结论作任何担保**，仅供自查参考。
+`modeltrace` 的 `engine_parity.test.mjs` 会与上游原版逐位对拍 —— 改归因算法后务必跑它。
 
 ---
 
 ## 🙏 致谢
 
-思路参考并致谢以下开源项目：
-
-- [veridrop](https://github.com/canarybyte/veridrop) —— 探针权重与阈值设计思路。
-- [claude-detector](https://github.com/7836246/claude-detector) —— Prompt 缓存、流式顺序、隐藏提示词等探针借鉴。
-
----
-
-## 🤝 贡献
-
-欢迎提交 Issue 与 Pull Request：题目建议、新探针、新协议支持、UI/文档改进都非常欢迎。
+- [veridrop](https://github.com/canarybyte/veridrop)、[claude-detector](https://github.com/7836246/claude-detector) —— `check` 的检测思路参考
+- [xqy2006/ModelTrace](https://github.com/xqy2006/ModelTrace)（MIT）—— `modeltrace` 的归因算法与初始指纹库
+- [hanlinwenyuan/hlwy-ai-checker](https://github.com/hanlinwenyuan/hlwy-ai-checker) —— 「用随机数偏好识别渠道」的思路来源
+- [Simon Willison 的 pelican-bicycle 基准](https://github.com/simonw/pelican-bicycle) —— `iq` 的题目灵感
 
 ---
 
 ## 📄 License
 
-本项目基于 [MIT License](./LICENSE) 开源。
+[MIT](./check/LICENSE)。三个站的检测结论都是**统计推断**，不构成任何担保，也不建议作为纠纷证据使用。

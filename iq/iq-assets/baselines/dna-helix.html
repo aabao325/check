@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>旋转 DNA 双螺旋 2D 动画</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      background: #050510;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    h1 {
+      color: #a0c4ff;
+      font-size: 1.4rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.6rem;
+      text-shadow: 0 0 12px rgba(100, 160, 255, 0.4);
+    }
+    .subtitle {
+      color: #6a7a9a;
+      font-size: 0.85rem;
+      margin-bottom: 1.2rem;
+    }
+    svg {
+      background: radial-gradient(ellipse at center, #12122a 0%, #050510 70%);
+      border-radius: 12px;
+      box-shadow: 0 0 40px rgba(40, 80, 180, 0.25);
+    }
+  </style>
+</head>
+<body>
+  <h1>DNA 双螺旋 · 持续旋转</h1>
+  <p class="subtitle">两条正弦骨架 · 相位差 π · 深度感由前后粗细与透明度体现</p>
+  <svg id="dna" width="720" height="560" viewBox="0 0 720 560"></svg>
+
+  <script>
+    const svg = document.getElementById('dna');
+    const NS = 'http://www.w3.org/2000/svg';
+
+    // ——— 可调参数 ———
+    const CX = 360;          // 中心 X
+    const START_Y = 40;      // 顶部 Y
+    const HEIGHT = 480;      // 总高度
+    const RADIUS = 95;       // 螺旋半径
+    const TURNS = 2.8;       // 圈数
+    const PAIRS = 28;        // 碱基对数量
+    const BB_WIDTH = 5.5;    // 骨架基础线宽
+    const RUNG_WIDTH = 3.2;  // 横档基础线宽
+    const SPEED = 0.018;     // 旋转角速度
+
+    let rotation = 0;
+
+    // 获取螺旋上的点（phase = 0 或 π）
+    function getPoint(theta, phase) {
+      const angle = theta + phase + rotation;
+      return {
+        x: CX + RADIUS * Math.cos(angle),
+        y: START_Y + (HEIGHT * theta) / (2 * Math.PI * TURNS),
+        z: RADIUS * Math.sin(angle)   // +z 朝向观察者
+      };
+    }
+
+    function draw() {
+      // 清空
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+      const segments = [];
+      const steps = PAIRS * 5;          // 骨架采样密度（保证平滑）
+
+      // —— 骨架链 1（青色）——
+      let prev = null;
+      for (let i = 0; i <= steps; i++) {
+        const theta = (i / steps) * 2 * Math.PI * TURNS;
+        const p = getPoint(theta, 0);
+        if (prev) {
+          segments.push({
+            x1: prev.x, y1: prev.y, z1: prev.z,
+            x2: p.x,    y2: p.y,    z2: p.z,
+            color: '#00ccff',
+            baseW: BB_WIDTH,
+            isRung: false
+          });
+        }
+        prev = p;
+      }
+
+      // —— 骨架链 2（玫红）——
+      prev = null;
+      for (let i = 0; i <= steps; i++) {
+        const theta = (i / steps) * 2 * Math.PI * TURNS;
+        const p = getPoint(theta, Math.PI);
+        if (prev) {
+          segments.push({
+            x1: prev.x, y1: prev.y, z1: prev.z,
+            x2: p.x,    y2: p.y,    z2: p.z,
+            color: '#ff4488',
+            baseW: BB_WIDTH,
+            isRung: false
+          });
+        }
+        prev = p;
+      }
+
+      // —— 碱基对横档 ——
+      // 交替两种颜色模拟不同碱基对
+      const rungColors = ['#88ffaa', '#ffcc66'];
+      for (let i = 0; i <= PAIRS; i++) {
+        const theta = (i / PAIRS) * 2 * Math.PI * TURNS;
+        const p1 = getPoint(theta, 0);
+        const p2 = getPoint(theta, Math.PI);
+        segments.push({
+          x1: p1.x, y1: p1.y, z1: p1.z,
+          x2: p2.x, y2: p2.y, z2: p2.z,
+          color: rungColors[i % 2],
+          baseW: RUNG_WIDTH,
+          isRung: true
+        });
+      }
+
+      // 按平均深度从后到前排序（小 z 先画）
+      segments.sort((a, b) => {
+        const za = (a.z1 + a.z2) * 0.5;
+        const zb = (b.z1 + b.z2) * 0.5;
+        return za - zb;
+      });
+
+      // 绘制
+      for (const seg of segments) {
+        const avgZ = (seg.z1 + seg.z2) * 0.5;
+        // depthFactor: 0（最远）→ 1（最近）
+        const depthFactor = (avgZ + RADIUS) / (2 * RADIUS);
+
+        // 前方更粗、更不透明
+        const width = seg.baseW * (0.45 + 0.9 * depthFactor);
+        const opacity = 0.35 + 0.65 * depthFactor;
+
+        const line = document.createElementNS(NS, 'line');
+        line.setAttribute('x1', seg.x1);
+        line.setAttribute('y1', seg.y1);
+        line.setAttribute('x2', seg.x2);
+        line.setAttribute('y2', seg.y2);
+        line.setAttribute('stroke', seg.color);
+        line.setAttribute('stroke-width', width.toFixed(2));
+        line.setAttribute('stroke-opacity', opacity.toFixed(3));
+        line.setAttribute('stroke-linecap', 'round');
+        // 横档稍微柔和一点
+        if (seg.isRung) {
+          line.setAttribute('stroke-linejoin', 'round');
+        }
+        svg.appendChild(line);
+      }
+    }
+
+    function animate() {
+      rotation += SPEED;
+      draw();
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  </script>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- 禁止缓存 HTML 文档本身：保证每次都拿到最新的 index.html，再由其引用带版本号的静态资源 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>御三家 API 真伪检测站 · 开源本地运行</title>
+  <!-- Favicon：品牌渐变盾牌（与站点视觉统一） -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css?v=37">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 顶栏：显眼标题（开源定位） -->
+  <div class="topbar">
+    <div>
+      <h1><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" style="vertical-align:-0.12em;margin-right:.12em" aria-hidden="true"><defs><linearGradient id="hsg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4285F4"/><stop offset="33%" stop-color="#9B72CB"/><stop offset="66%" stop-color="#EA4986"/><stop offset="100%" stop-color="#FF8A3D"/></linearGradient></defs><path d="M12 1.6 20.4 4.9V11c0 5.3-3.6 9.4-8.4 11.3C7.2 20.4 3.6 16.3 3.6 11V4.9Z" fill="url(#hsg)"/><path d="M8 12.1l2.7 2.7L16.2 9" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg> 御三家 API <span class="accent">真伪检测站</span></h1>
+      <div class="sub">一键鉴别 OpenAI / Claude / Gemini API 中转站真伪 —— 掺假冒充、协议篡改、能力降级、隐藏提示词注入，逐项可见、有理有据。</div>
+    </div>
+    <a class="btn btn-ghost btn-sm" href="../">↩ 返回主页</a>
+  </div>
+
+  <!-- 开源本地运行说明（第5b：仿 veridrop） -->
+  <div class="local-banner">
+    <span class="ico">🔒</span>
+    <span>
+      这是一个<b>开源的、在你浏览器本地运行</b>的 API 真伪检测站。所有特征判定逻辑<b>全部开源、运行在本地前端</b>；
+      我们<b>不在云端保存你的 API Key 或检测数据</b>，请求记录仅存于你本地浏览器。
+      （请求经一个轻量代理转发仅为绕过浏览器跨域限制，<b>不落库</b>；只有当你主动点「分享报告」时，报告才会上传以生成分享链接。）
+    </span>
+  </div>
+
+  <!-- 协议切换（两视图共享） -->
+  <div class="proto-tabs" id="protoTabs"></div>
+
+  <!-- 右侧悬浮栏：配置库 + 检测历史 上下排列（统一定位，避免与左侧「检测项目录」浮层重叠）。
+       窗口不够宽时整列降级为正文内联卡片。 -->
+  <div class="side-rail" id="sideRail">
+
+  <!-- 配置库：存当前接口/模型/Key/beta 到本地浏览器，按御三家协议分别归类，定期复检一键导入。 -->
+  <aside class="cfg-store" id="cfgStore" aria-label="配置库">
+    <button class="cfg-store-head" id="cfgToggle" aria-expanded="true">
+      <span class="cfg-store-title">🗂️ 配置库<span class="muted" id="cfgProtoName"></span></span>
+      <span class="cfg-caret">▾</span>
+    </button>
+    <div class="cfg-store-body" id="cfgBody">
+      <div class="cfg-saved" id="cfgSaved"></div>
+      <div class="cfg-save-row">
+        <input id="cfgLabel" maxlength="40" placeholder="备注标签（如：中转站A）" autocomplete="off">
+        <button class="btn btn-primary btn-sm" id="cfgSaveBtn">💾 保存当前</button>
+      </div>
+      <div class="cfg-store-tip muted">仅存于本机浏览器 · 不会上传云端</div>
+    </div>
+  </aside>
+
+  <!-- 检测历史（配置库下方）：每跑完一整套检测自动存一条快照到本地浏览器，
+       切换协议/刷新页面都不丢失；点「查看详情」用 iframe 嵌报告页展示完整结果。 -->
+  <aside class="history-store" id="historyStore" aria-label="检测历史">
+    <button class="cfg-store-head" id="historyToggle" aria-expanded="true">
+      <span class="cfg-store-title">🕘 检测历史<span class="muted" id="historyCount"></span></span>
+      <span class="cfg-caret">▾</span>
+    </button>
+    <div class="cfg-store-body" id="historyBody">
+      <div class="history-list" id="historyList"></div>
+      <button class="btn btn-ghost btn-sm history-clear" id="historyClearBtn" style="display:none">🗑 清空全部历史</button>
+      <div class="cfg-store-tip muted">检测完自动记录 · 最多保留 30 条</div>
+    </div>
+  </aside>
+
+  </div><!-- /#sideRail -->
+
+  <!-- 输入区（两视图共享：模型 / 接口 / Key / 深度 / 高级设置） -->
+  <div class="card">
+    <div class="row">
+      <div class="field" style="flex:2">
+        <label>接口地址</label>
+        <input id="endpoint" placeholder="https://你的中转站/v1/messages">
+      </div>
+      <div class="field">
+        <label>模型名</label>
+        <input id="model" placeholder="claude-opus-4-8">
+      </div>
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input id="apiKey" type="password" placeholder="sk-...（默认不保存；可在右侧「配置库」一键存到本地浏览器，方便定期复检）">
+    </div>
+
+    <div class="field" id="modeRow">
+      <label>检测深度</label>
+      <div class="mode-btns" id="modeBtns">
+        <button class="mode-btn" data-mode="Q">快速（核心几项）</button>
+        <button class="mode-btn active" data-mode="S">标准（推荐）</button>
+        <button class="mode-btn" data-mode="F">完整（含长上下文，耗费高）</button>
+      </div>
+    </div>
+
+    <details class="adv">
+      <summary>🔧 自定义检测项与高级设置</summary>
+      <div style="margin-top:12px">
+        <div class="field" id="betaRow">
+          <label>anthropic-beta 头</label>
+          <input id="betaHeader" placeholder="context-management-2025-06-27,...">
+        </div>
+        <div class="field" id="mimicRow">
+          <div class="switch-row">
+            <label class="switch">
+              <input type="checkbox" id="mimicToggle">
+              <span class="track"><span class="thumb"></span></span>
+            </label>
+            <div class="switch-label">伪装为 Claude Code 官方客户端</div>
+          </div>
+          <div class="switch-hint">
+            针对网关「仅允许 Claude Code 客户端」类限制：自动附加 User-Agent/X-App 请求头 + system 计费归因块 + metadata.user_id。
+            <b>仅适用于你自己可控的网关/账号自测</b>，不要用于绕过无权限访问的第三方限制。
+          </div>
+          <div class="mimic-panel" id="mimicPanel">
+            <div class="field">
+              <label>User-Agent 请求头</label>
+              <input id="mimicUA" placeholder="claude-cli/2.1.161 (external, cli)">
+            </div>
+            <div class="field">
+              <label>system 计费归因块文本</label>
+              <input id="mimicBilling" placeholder="x-anthropic-billing-header: cc_version=2.1.161.xxx; cc_entrypoint=cli;">
+            </div>
+          </div>
+        </div>
+        <div class="field" id="longCtxRow">
+          <label>长上下文分档（长上下文真实性探针，仅 Claude 完整档生效）</label>
+          <div class="tier-toggles" id="longCtxTiers"></div>
+          <div class="muted" style="font-size:11.5px;line-height:1.5;margin-top:6px">
+            500k/800k/1000k 已超出 Claude 标准 200k 上下文，若要测试需自行在上方 anthropic-beta 头加入长上下文扩展标识，且单次请求可能消耗几十万至百万 token（费用较高）。
+            大档位请求体可能达数 MB，请确认服务器 PHP post_max_size 足够；若响应缓慢导致后端转发超时，可在 <code>api/config.php</code> 调大 <code>PROBE_TIMEOUT</code>。
+          </div>
+        </div>
+        <div class="field" id="probeToggleRow">
+          <label>勾选要运行的检测项（按检测深度自动预选，专业用户可微调）</label>
+          <div class="probe-toggles" id="probeToggles"></div>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- ============ 自动检测主区 ============ -->
+  <div id="view-main">
+
+    <div class="card">
+      <div class="muted" style="font-size:13px;margin-bottom:12px">
+        填好上方接口地址与 API Key，点「开始检测」即可<b>自动发起整套探针请求</b>并逐项给出真伪判定。
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="runBtn">🟢 开始检测</button>
+        <button class="btn btn-ghost" id="summaryBtn">🤖 生成 AI 总结</button>
+        <button class="btn btn-ghost" id="shareBtn">🔗 分享报告</button>
+        <!-- 思考签名解析器：仅 Claude 协议、且该工具已部署时显示（见 app.js updateSigToolBtn） -->
+        <a class="btn btn-ghost" id="sigToolBtn" href="./sig.html" target="_blank" rel="noopener"
+           style="display:none" title="打开思考签名解析器：粘贴响应 JSON，逐项验证 thinking signature 结构">🔬 签名解析器</a>
+      </div>
+    </div>
+
+    <!-- 总览 -->
+    <div class="card" id="overview" style="display:none">
+      <div class="overview">
+        <div class="ring" id="ring"><div class="inner"><div class="score" id="ringScore">--</div><div class="lab">综合分</div></div></div>
+        <div class="ov-main">
+          <div class="verdict" id="ovVerdict">等待检测</div>
+          <div>渠道来源：<span class="badge unknown" id="ovChannel">未知</span></div>
+          <div class="crit-banner" id="critBanner" style="display:none">🔴 命中严重异常（疑似套壳/冒充），综合评级已封顶。请重点查看下方标红项。</div>
+        </div>
+      </div>
+      <div class="summary-box" id="summaryBox" style="display:none;margin-top:14px"></div>
+    </div>
+
+    <!-- 探针卡片 + 左侧目录导航（点击丝滑跳转并展开） -->
+    <div class="cards-layout">
+      <aside class="cards-nav" id="cardsNav" aria-label="检测项目录"></aside>
+      <div id="cards"></div>
+    </div>
+  </div>
+
+  <!-- ============ 检测项说明（默认折叠） ============ -->
+  <div class="card">
+    <details id="probeDocsDetails">
+      <summary><h2 style="display:inline;">📖 检测项说明</h2> <span class="muted" id="probeCount"></span></summary>
+      <div class="faq-sub">想知道每一档都检测了什么？下面列出当前协议的全部检测项与权重（权重越高，对真伪判定影响越大）。</div>
+      <div id="probeDocs"></div>
+    </details>
+  </div>
+
+  <!-- ============ 常见问题 ============ -->
+  <div class="card faq">
+    <h2>❓ 常见问题</h2>
+
+    <div class="faq-q">为什么有「快速 / 标准 / 完整」三档？</div>
+    <div class="faq-a">不同档位运行不同数量的检测项：快速只跑最核心几项、标准覆盖绝大多数、完整额外加上耗时较高的长上下文真实性等。深度越高越准，但耗费的 token 也越多。</div>
+
+    <div class="faq-q">智商 / 推理题能反馈或新增吗？</div>
+    <div class="faq-a">题库由站点统一维护、写死在代码里（不开放用户自行添加，以防被针对性「刷题」绕过）；但<b>非常欢迎反馈题目建议</b>，请到开源仓库提 <a id="faqIssueLink" href="#" target="_blank" rel="noopener">GitHub Issue</a>。</div>
+
+    <div class="faq-q">我的 API Key 安全吗？</div>
+    <div class="faq-a">Key 只在你本地浏览器与转发代理之间使用，<b>不写入任何数据库</b>。代理仅做一次性转发以绕过浏览器跨域限制。所有特征判定逻辑都在你本地前端运行、开源可查。</div>
+
+    <div class="faq-q">「伪装为 Claude Code 官方客户端」开关是做什么的？</div>
+    <div class="faq-a">部分中转网关会给分组设置「仅允许 Claude Code 官方客户端」的限制，判定依据是 User-Agent、system 提示词特征、若干 header 是否非空、metadata.user_id 格式等应用层特征（与 TLS 指纹无关）。开启此开关后，Claude 协议的检测请求会自动带上这些特征，从而通过该类限制。<b>仅适用于你自己搭建/管理、可控的网关或账号自测</b>，请勿用于绕过你无权限访问的第三方限制。</div>
+  </div>
+
+  <!-- ============ 页脚：透明度声明 / 致谢 / 开源（第5c） ============ -->
+  <div class="site-foot">
+    <div class="foot-row">
+      <a id="repoLink" href="#" target="_blank" rel="noopener">⭐ 开源仓库（GitHub）</a>
+      <a id="issueLink" href="#" target="_blank" rel="noopener">💬 反馈 / 提 Issue</a>
+      <span class="muted" id="brandFoot"></span>
+    </div>
+    <div class="transparency">
+      <b>透明度声明：</b>本站特征判定逻辑<b>全部前端开源、本地运行，不保存你的 Key 与检测数据</b>。
+      <br>
+      <b>致谢：</b>致谢开源项目
+      <a href="https://github.com/canarybyte/veridrop" target="_blank" rel="noopener">veridrop</a> 与
+      <a href="https://github.com/7836246/claude-detector" target="_blank" rel="noopener">claude-detector</a>。本站为开源项目，不对检测结论作任何担保，仅供自查参考。
+    </div>
+  </div>
+</div>
+
+<!-- 检测历史「查看详情」弹窗：内嵌 iframe 加载 report.html#data=<快照>，复用报告页完整渲染（评分环/渠道徽标/探针明细），
+     与「分享报告」同一套展示。点 ✕ / 点遮罩空白 / 按 Esc 均可关闭。 -->
+<div class="history-modal-overlay" id="historyModal" style="display:none" aria-hidden="true">
+  <div class="history-modal" role="dialog" aria-modal="true" aria-label="检测详情">
+    <div class="history-modal-head">
+      <span class="history-modal-title" id="historyModalTitle">检测报告</span>
+      <button class="history-modal-close" id="historyModalClose" aria-label="关闭">✕</button>
+    </div>
+    <iframe class="history-modal-frame" id="historyModalFrame" title="检测详情报告"></iframe>
+  </div>
+</div>
+
+<script src="assets/app.js?v=37" type="module"></script>
+</body>
+</html>

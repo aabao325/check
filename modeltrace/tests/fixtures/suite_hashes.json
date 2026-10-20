@@ -1,0 +1,362 @@
+[
+ {
+  "challenge_id": "query-01",
+  "condition": "environment-01",
+  "expected_count": 218,
+  "transport": "clean",
+  "prompt": "93123da5b461d148",
+  "base_prompt": "93123da5b461d148",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-02",
+  "condition": "environment-01",
+  "expected_count": 233,
+  "transport": "clean",
+  "prompt": "960c67f12e19153e",
+  "base_prompt": "960c67f12e19153e",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-03",
+  "condition": "environment-01",
+  "expected_count": 247,
+  "transport": "clean",
+  "prompt": "160345deac87d7ab",
+  "base_prompt": "160345deac87d7ab",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-04",
+  "condition": "environment-02",
+  "expected_count": 223,
+  "transport": "clean",
+  "prompt": "124faa581e287cc5",
+  "base_prompt": "124faa581e287cc5",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-05",
+  "condition": "environment-02",
+  "expected_count": 239,
+  "transport": "clean",
+  "prompt": "2acf32f9e98a92f7",
+  "base_prompt": "2acf32f9e98a92f7",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-06",
+  "condition": "environment-02",
+  "expected_count": 251,
+  "transport": "clean",
+  "prompt": "84db315054ed18d3",
+  "base_prompt": "84db315054ed18d3",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-07",
+  "condition": "environment-03",
+  "expected_count": 227,
+  "transport": "system",
+  "prompt": "3732983bdde57ff4",
+  "base_prompt": "3732983bdde57ff4",
+  "system": "30f849c792646abf",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-08",
+  "condition": "environment-03",
+  "expected_count": 241,
+  "transport": "system",
+  "prompt": "5f26abb80b230855",
+  "base_prompt": "5f26abb80b230855",
+  "system": "30f849c792646abf",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-09",
+  "condition": "environment-03",
+  "expected_count": 257,
+  "transport": "system",
+  "prompt": "9a78e828134667b8",
+  "base_prompt": "9a78e828134667b8",
+  "system": "30f849c792646abf",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-10",
+  "condition": "environment-04",
+  "expected_count": 294,
+  "transport": "clean",
+  "prompt": "da679fbc35e4a378",
+  "base_prompt": "da679fbc35e4a378",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-11",
+  "condition": "environment-04",
+  "expected_count": 311,
+  "transport": "clean",
+  "prompt": "56534c41378a8126",
+  "base_prompt": "56534c41378a8126",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-12",
+  "condition": "environment-04",
+  "expected_count": 329,
+  "transport": "clean",
+  "prompt": "b6a875503df8b40f",
+  "base_prompt": "b6a875503df8b40f",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-13",
+  "condition": "environment-05",
+  "expected_count": 297,
+  "transport": "clean",
+  "prompt": "7c2ad582b43d3c59",
+  "base_prompt": "7c2ad582b43d3c59",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-14",
+  "condition": "environment-05",
+  "expected_count": 315,
+  "transport": "clean",
+  "prompt": "29c05b4df1acacc9",
+  "base_prompt": "29c05b4df1acacc9",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-15",
+  "condition": "environment-05",
+  "expected_count": 331,
+  "transport": "clean",
+  "prompt": "23487ea1c9af8f67",
+  "base_prompt": "23487ea1c9af8f67",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-16",
+  "condition": "environment-06",
+  "expected_count": 301,
+  "transport": "clean",
+  "prompt": "2224ec3f633e620e",
+  "base_prompt": "2224ec3f633e620e",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-17",
+  "condition": "environment-06",
+  "expected_count": 319,
+  "transport": "clean",
+  "prompt": "f7f8c95089e173ba",
+  "base_prompt": "f7f8c95089e173ba",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-18",
+  "condition": "environment-06",
+  "expected_count": 327,
+  "transport": "clean",
+  "prompt": "4c9c3a97f6c73960",
+  "base_prompt": "4c9c3a97f6c73960",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-19",
+  "condition": "environment-07",
+  "expected_count": 293,
+  "transport": "system",
+  "prompt": "1b11ce7979d4b673",
+  "base_prompt": "1b11ce7979d4b673",
+  "system": "8c67a4a0f55b0718",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-20",
+  "condition": "environment-07",
+  "expected_count": 310,
+  "transport": "system",
+  "prompt": "b3229d10040c221e",
+  "base_prompt": "b3229d10040c221e",
+  "system": "a868e9c48131547d",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-21",
+  "condition": "environment-07",
+  "expected_count": 326,
+  "transport": "system",
+  "prompt": "f9c7ed4352bd7313",
+  "base_prompt": "f9c7ed4352bd7313",
+  "system": "b9b2419b8fa9ab92",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-22",
+  "condition": "environment-08",
+  "expected_count": 296,
+  "transport": "system",
+  "prompt": "8b81cf9d70dd420e",
+  "base_prompt": "8b81cf9d70dd420e",
+  "system": "1ffbf1692c2dbacf",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-23",
+  "condition": "environment-08",
+  "expected_count": 314,
+  "transport": "system",
+  "prompt": "a76e63f5caaa78b3",
+  "base_prompt": "a76e63f5caaa78b3",
+  "system": "51438af810e77cf8",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-24",
+  "condition": "environment-08",
+  "expected_count": 330,
+  "transport": "system",
+  "prompt": "6bd4475b7305411a",
+  "base_prompt": "6bd4475b7305411a",
+  "system": "424e4bc0e7eec2e9",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-25",
+  "condition": "environment-09",
+  "expected_count": 299,
+  "transport": "system",
+  "prompt": "e8648cf08dec6e13",
+  "base_prompt": "e8648cf08dec6e13",
+  "system": "3da1478a35ae8e8b",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-26",
+  "condition": "environment-09",
+  "expected_count": 317,
+  "transport": "system",
+  "prompt": "80fbda79298d2068",
+  "base_prompt": "80fbda79298d2068",
+  "system": "23c08dc95221c4d5",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-27",
+  "condition": "environment-09",
+  "expected_count": 332,
+  "transport": "system",
+  "prompt": "1c86821e01f56987",
+  "base_prompt": "1c86821e01f56987",
+  "system": "e3c73e81965d7ad5",
+  "user_prefix": "e3b0c44298fc1c14"
+ },
+ {
+  "challenge_id": "query-28",
+  "condition": "environment-10",
+  "expected_count": 292,
+  "transport": "user",
+  "prompt": "72314199d084981f",
+  "base_prompt": "ccf2e7d56a2d5edd",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "8c67a4a0f55b0718"
+ },
+ {
+  "challenge_id": "query-29",
+  "condition": "environment-10",
+  "expected_count": 308,
+  "transport": "user",
+  "prompt": "6a692773db3f5625",
+  "base_prompt": "310a49a4334007e0",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "a868e9c48131547d"
+ },
+ {
+  "challenge_id": "query-30",
+  "condition": "environment-10",
+  "expected_count": 324,
+  "transport": "user",
+  "prompt": "cbb09bb3d2ee0042",
+  "base_prompt": "3f27c770e040cae7",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "b9b2419b8fa9ab92"
+ },
+ {
+  "challenge_id": "query-31",
+  "condition": "environment-11",
+  "expected_count": 295,
+  "transport": "user",
+  "prompt": "b0563c4b339d3188",
+  "base_prompt": "95ea11461f5f1010",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "1ffbf1692c2dbacf"
+ },
+ {
+  "challenge_id": "query-32",
+  "condition": "environment-11",
+  "expected_count": 313,
+  "transport": "user",
+  "prompt": "a6d4a932f08be5d5",
+  "base_prompt": "3228eb684b7cfa0d",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "51438af810e77cf8"
+ },
+ {
+  "challenge_id": "query-33",
+  "condition": "environment-11",
+  "expected_count": 328,
+  "transport": "user",
+  "prompt": "8e88423d743a7b25",
+  "base_prompt": "772ee65dae79e65f",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "424e4bc0e7eec2e9"
+ },
+ {
+  "challenge_id": "query-34",
+  "condition": "environment-12",
+  "expected_count": 298,
+  "transport": "user",
+  "prompt": "3ebc8735aaa9a233",
+  "base_prompt": "f8123907b36dad4f",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "3da1478a35ae8e8b"
+ },
+ {
+  "challenge_id": "query-35",
+  "condition": "environment-12",
+  "expected_count": 316,
+  "transport": "user",
+  "prompt": "101e4a8bfa7a6f54",
+  "base_prompt": "fe88745901825599",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "23c08dc95221c4d5"
+ },
+ {
+  "challenge_id": "query-36",
+  "condition": "environment-12",
+  "expected_count": 333,
+  "transport": "user",
+  "prompt": "e47bf164f398ff91",
+  "base_prompt": "d0672e94d1efc192",
+  "system": "e3b0c44298fc1c14",
+  "user_prefix": "e3c73e81965d7ad5"
+ }
+]

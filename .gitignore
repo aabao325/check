@@ -1,14 +1,53 @@
-# 私密配置（令牌等）——不纳入版本库/更新，避免被覆盖
-api/config.php
+# ============================================================================
+# 仓库根 .gitignore —— 三个检测站共用
+# ----------------------------------------------------------------------------
+# 三站结构对称：
+#   <项目>/api/config.php  或  <项目>/iq-config.php   私密配置（含密钥）
+#   <项目>/data/                                       运行时生成的数据
+#
+# ⚠ 忽略规则相对 .gitignore 所在目录生效：含斜杠的只匹配该相对路径，
+#   所以子项目里的规则必须带上项目名，不能沿用原来的 `api/config.php`。
+# ============================================================================
 
-# 分享报告数据目录（运行时生成）
-data/*
-!data/.gitkeep
-docs
-test
+# ---------- 私密配置：绝不能进公开仓库 ----------
+# 内含真实 API Key / 管理员口令哈希 / 生产服务器绝对路径
+check/api/config.php
+iq/iq-config.php
+modeltrace/api/config.php
 
+# 模板文件是给人复制用的，必须保留
+!check/api/config.example.php
+!iq/iq-config.example.php
+!modeltrace/api/config.example.php
 
-# 内部工具：思考签名解析器。解析算法是本站的核心判定逻辑，
-# 不随开源仓库发布——只手工部署到服务器，源码不进版本库。
-sig.html
-api/sig_parse.php
+# ---------- 运行时数据：分享报告 / 会话 / 限流计数 / 档案 ----------
+check/data/*
+!check/data/.gitkeep
+# iq 的报告目录由 iq-share.php 在首次分享时自动 mkdir，不需要占位文件。
+# （注意：父目录被整目录排除后，Git 无法再用 ! 把里面的文件加回来。）
+iq/data/
+modeltrace/data/runtime/
+
+# 注意：modeltrace/data/bank/ 是**内置指纹基准库**，属于源码的一部分，
+#       必须提交（分享页靠它现场重算分布图），不要一并忽略。
+
+# ---------- 内部工具：思考签名解析器 ----------
+# 解析算法是本站的核心判定逻辑，只手工部署到服务器，源码不进版本库。
+check/sig.html
+check/api/sig_parse.php
+
+# ---------- Python 产物 ----------
+# 曾误提交过一个 .pyc（tests/__pycache__/decode_signature.cpython-314.pyc）：
+# 内部签名解码器的字节码，且编译产物本就不该入库。
+__pycache__/
+*.py[cod]
+
+# ---------- 编辑器 / 系统垃圾 ----------
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# ---------- 本地开发目录 ----------
+check/docs/

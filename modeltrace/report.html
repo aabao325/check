@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<!-- ⚠️ 必须在任何相对地址之前定下基准路径。
+     分享短链是 /modeltrace/s/<id>，那一层的目录深度与 report.html 不同 ——
+     浏览器按页面地址解析 './assets/...' 会变成 /modeltrace/s/assets/...（404），
+     页面直接白给。本页既要能在 /modeltrace/report.html 打开（本地直开文件、
+     旧链接），也要能在 /modeltrace/s/<id> 打开，所以基准不能写死成 <base href="../">。
+     用一段内联脚本按当前路径算出「站点目录」再写 <base>：
+       /modeltrace/s/a1b2c3d4  → /modeltrace/
+       /modeltrace/report.html → /modeltrace/
+       /modeltrace/            → /modeltrace/
+     ⚠️ 脚本必须排在**所有相对地址之前**（<base> 只影响它之后出现的相对地址），
+        所以放在 head 顶部；但 charset 要排在它前面 —— 规范要求 charset 落在前
+        1024 字节内，本页那段注释本身就有 1KB，压在 charset 前面会让它超限，
+        服务器没带 charset 头时中文标题就乱码了。 -->
+<script>
+(function () {
+  var p = location.pathname;
+  var base = /\/s\/[^/]*\/?$/.test(p)
+    ? p.replace(/\/s\/[^/]*\/?$/, '/')            // 分享短链
+    : p.replace(/\/[^/]*$/, '/');                 // 普通页：去掉文件名
+  var b = document.createElement('base');
+  b.href = base;
+  document.head.appendChild(b);
+})();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>大模型归因检测报告 · Aabao.AI 工具箱</title>
+<!-- 分享页不进搜索引擎：报告内容按 id 从后端取，索引它只会拿到空页面 -->
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/svg+xml" href="../og-cover.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./assets/styles.css?v=13">
+<style>
+  /* 分享页只有一张报告卡，不需要页面自带的区块间距，单独收紧几处。
+     ⚠️ 宽度跟站内正文对齐（--maxw 1120px），不要另给一个窄值：
+     早先这里是 880px，两张分布图被压掉 21% 的宽度、显得又小又挤 ——
+     而分享页的主要看点恰恰是这两张图。 */
+  body { padding: 26px 0 60px; }
+  .share-wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+  .share-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 12px; }
+  .share-missing { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 34px 26px; text-align: center; }
+  .share-missing h1 { font-size: 19px; margin-bottom: 8px; }
+  .share-missing p { color: var(--ink-soft); font-size: 13.5px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="share-wrap">
+  <div class="share-actions" id="shareActions" hidden>
+    <button class="btn btn-ghost btn-sm" id="copyBtn">🔗 复制本页链接</button>
+    <button class="btn btn-ghost btn-sm" id="pngBtn">📷 导出 PNG</button>
+    <a class="btn btn-accent btn-sm" id="gotoBtn" href="./" style="text-decoration:none">🧭 自己测一测</a>
+  </div>
+  <div id="reportHost"></div>
+</div>
+
+<script src="../check/assets/qrcode.min.js?v=13"></script>
+<!-- html2canvas 用于导出 PNG。**自托管**而不是走 CDN：隐私浏览器会拦掉三方脚本
+     对存储的访问（控制台刷一屏 Tracking Prevention 告警），且少一个外部失败点。
+     加载失败时导出按钮会提示，不影响查看报告。 -->
+<script src="./assets/vendor/html2canvas.min.js?v=13"></script>
+<script type="module" src="./assets/report.js?v=13"></script>
+</body>
+</html>

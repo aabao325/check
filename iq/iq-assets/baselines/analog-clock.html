@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>实时模拟时钟</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .clock-container {
+      text-align: center;
+    }
+    .clock-container h1 {
+      color: #e94560;
+      margin-bottom: 20px;
+      font-size: 1.5rem;
+      letter-spacing: 2px;
+      text-shadow: 0 0 10px rgba(233, 69, 96, 0.5);
+    }
+    svg {
+      filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5));
+    }
+    .time-display {
+      margin-top: 20px;
+      color: #a0a0a0;
+      font-size: 1.1rem;
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+  <div class="clock-container">
+    <h1>模拟时钟</h1>
+    <svg id="clock" width="320" height="320" viewBox="0 0 200 200">
+      <!-- 外圈装饰 -->
+      <circle cx="100" cy="100" r="98" fill="none" stroke="#e94560" stroke-width="2" opacity="0.6"/>
+      
+      <!-- 表盘背景 -->
+      <circle cx="100" cy="100" r="95" fill="#1a1a2e" stroke="#533483" stroke-width="3"/>
+      
+      <!-- 内圈 -->
+      <circle cx="100" cy="100" r="88" fill="none" stroke="#0f3460" stroke-width="1"/>
+      
+      <!-- 12 个小时刻度 -->
+      <g id="ticks" stroke="#eaeaea" stroke-linecap="round">
+        <!-- 刻度将由 JS 生成，或直接写 -->
+      </g>
+      
+      <!-- 数字 12, 3, 6, 9 -->
+      <text x="100" y="28" text-anchor="middle" fill="#e94560" font-size="14" font-weight="bold">12</text>
+      <text x="175" y="105" text-anchor="middle" fill="#e94560" font-size="14" font-weight="bold">3</text>
+      <text x="100" y="182" text-anchor="middle" fill="#e94560" font-size="14" font-weight="bold">6</text>
+      <text x="25" y="105" text-anchor="middle" fill="#e94560" font-size="14" font-weight="bold">9</text>
+      
+      <!-- 时针 -->
+      <g id="hour-hand">
+        <line x1="100" y1="100" x2="100" y2="55" stroke="#eaeaea" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="100" cy="100" r="6" fill="#eaeaea"/>
+      </g>
+      
+      <!-- 分针 -->
+      <g id="minute-hand">
+        <line x1="100" y1="100" x2="100" y2="35" stroke="#a0a0a0" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="100" cy="100" r="5" fill="#a0a0a0"/>
+      </g>
+      
+      <!-- 秒针 -->
+      <g id="second-hand">
+        <line x1="100" y1="115" x2="100" y2="25" stroke="#e94560" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="100" cy="100" r="4" fill="#e94560"/>
+        <circle cx="100" cy="25" r="3" fill="#e94560"/>
+      </g>
+      
+      <!-- 中心点 -->
+      <circle cx="100" cy="100" r="3" fill="#1a1a2e" stroke="#e94560" stroke-width="1.5"/>
+    </svg>
+    <div class="time-display" id="digital">--:--:--</div>
+  </div>
+
+  <script>
+    // 生成 12 个小时刻度
+    (function createTicks() {
+      const ticksGroup = document.getElementById('ticks');
+      for (let i = 0; i < 12; i++) {
+        const angle = (i * 30) * Math.PI / 180; // 每 30 度
+        const isMajor = true; // 全部是小时刻度
+        const outer = 88;
+        const inner = 78;
+        const x1 = 100 + outer * Math.sin(angle);
+        const y1 = 100 - outer * Math.cos(angle);
+        const x2 = 100 + inner * Math.sin(angle);
+        const y2 = 100 - inner * Math.cos(angle);
+        
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        line.setAttribute('stroke-width', i % 3 === 0 ? 3 : 2);
+        ticksGroup.appendChild(line);
+      }
+    })();
+
+    const hourHand = document.getElementById('hour-hand');
+    const minuteHand = document.getElementById('minute-hand');
+    const secondHand = document.getElementById('second-hand');
+    const digital = document.getElementById('digital');
+
+    function updateClock() {
+      const now = new Date();
+      
+      // 获取时间（带毫秒实现平滑秒针）
+      const ms = now.getMilliseconds();
+      const seconds = now.getSeconds() + ms / 1000;
+      const minutes = now.getMinutes() + seconds / 60;
+      const hours = (now.getHours() % 12) + minutes / 60;
+
+      // 计算角度
+      // 秒针：每秒 6 度
+      const secondAngle = seconds * 6;
+      // 分针：每分钟 6 度
+      const minuteAngle = minutes * 6;
+      // 时针：每小时 30 度
+      const hourAngle = hours * 30;
+
+      // 应用旋转（绕中心 100,100）
+      hourHand.setAttribute('transform', `rotate(${hourAngle} 100 100)`);
+      minuteHand.setAttribute('transform', `rotate(${minuteAngle} 100 100)`);
+      secondHand.setAttribute('transform', `rotate(${secondAngle} 100 100)`);
+
+      // 数字时间显示
+      const h = String(now.getHours()).padStart(2, '0');
+      const m = String(now.getMinutes()).padStart(2, '0');
+      const s = String(now.getSeconds()).padStart(2, '0');
+      digital.textContent = `${h}:${m}:${s}`;
+    }
+
+    // 立即更新一次
+    updateClock();
+    
+    // 使用 requestAnimationFrame 实现流畅实时更新
+    function animate() {
+      updateClock();
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>

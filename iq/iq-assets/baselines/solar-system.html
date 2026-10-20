@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>太阳系公转动画</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      background: #03040a;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #e0e6f0;
+      overflow: hidden;
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 500;
+      letter-spacing: 0.15em;
+      margin-bottom: 0.6rem;
+      color: #f0c040;
+      text-shadow: 0 0 12px rgba(240, 192, 64, 0.4);
+    }
+    .subtitle {
+      font-size: 0.85rem;
+      color: #8899aa;
+      margin-bottom: 1.2rem;
+    }
+    .stage {
+      position: relative;
+      width: min(92vmin, 720px);
+      height: min(92vmin, 720px);
+    }
+    svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      border-radius: 50%;
+      background: radial-gradient(circle at center, #0a1020 0%, #03040a 70%);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.06),
+        0 0 40px rgba(0, 40, 120, 0.3),
+        inset 0 0 80px rgba(0,0,0,0.6);
+    }
+    .legend {
+      margin-top: 1.2rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.6rem 1.2rem;
+      font-size: 0.78rem;
+      color: #a0b0c0;
+      max-width: 640px;
+    }
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .legend i {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .tip {
+      margin-top: 0.8rem;
+      font-size: 0.72rem;
+      color: #667788;
+    }
+  </style>
+</head>
+<body>
+  <h1>太阳系 · 公转动画</h1>
+  <p class="subtitle">内行星公转更快 · 地球携带月球</p>
+
+  <div class="stage">
+    <svg viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+      <!-- 背景星空 -->
+      <g id="stars" fill="#fff">
+        <circle cx="60" cy="90" r="0.8" opacity="0.7"/>
+        <circle cx="140" cy="50" r="0.6" opacity="0.5"/>
+        <circle cx="220" cy="130" r="1" opacity="0.9"/>
+        <circle cx="310" cy="40" r="0.5" opacity="0.4"/>
+        <circle cx="380" cy="100" r="0.7" opacity="0.6"/>
+        <circle cx="480" cy="60" r="0.9" opacity="0.8"/>
+        <circle cx="560" cy="120" r="0.5" opacity="0.5"/>
+        <circle cx="650" cy="45" r="0.8" opacity="0.7"/>
+        <circle cx="720" cy="95" r="0.6" opacity="0.4"/>
+        <circle cx="90" cy="200" r="0.7" opacity="0.6"/>
+        <circle cx="180" cy="250" r="0.5" opacity="0.3"/>
+        <circle cx="70" cy="320" r="0.9" opacity="0.8"/>
+        <circle cx="30" cy="400" r="0.6" opacity="0.5"/>
+        <circle cx="110" cy="480" r="0.7" opacity="0.6"/>
+        <circle cx="50" cy="560" r="0.5" opacity="0.4"/>
+        <circle cx="160" cy="620" r="0.8" opacity="0.7"/>
+        <circle cx="80" cy="700" r="0.6" opacity="0.5"/>
+        <circle cx="250" cy="680" r="0.9" opacity="0.8"/>
+        <circle cx="340" cy="730" r="0.5" opacity="0.4"/>
+        <circle cx="420" cy="690" r="0.7" opacity="0.6"/>
+        <circle cx="510" cy="740" r="0.6" opacity="0.5"/>
+        <circle cx="590" cy="700" r="0.8" opacity="0.7"/>
+        <circle cx="670" cy="750" r="0.5" opacity="0.3"/>
+        <circle cx="740" cy="680" r="0.7" opacity="0.6"/>
+        <circle cx="760" cy="580" r="0.9" opacity="0.8"/>
+        <circle cx="710" cy="500" r="0.5" opacity="0.4"/>
+        <circle cx="750" cy="420" r="0.6" opacity="0.5"/>
+        <circle cx="720" cy="340" r="0.8" opacity="0.7"/>
+        <circle cx="760" cy="260" r="0.5" opacity="0.3"/>
+        <circle cx="690" cy="200" r="0.7" opacity="0.6"/>
+        <circle cx="740" cy="150" r="0.6" opacity="0.5"/>
+        <circle cx="300" cy="180" r="0.5" opacity="0.4"/>
+        <circle cx="450" cy="220" r="0.8" opacity="0.7"/>
+        <circle cx="550" cy="280" r="0.5" opacity="0.3"/>
+        <circle cx="200" cy="350" r="0.7" opacity="0.6"/>
+        <circle cx="350" cy="400" r="0.4" opacity="0.3"/>
+        <circle cx="480" cy="450" r="0.6" opacity="0.5"/>
+        <circle cx="620" cy="380" r="0.5" opacity="0.4"/>
+        <circle cx="280" cy="520" r="0.8" opacity="0.7"/>
+        <circle cx="400" cy="580" r="0.5" opacity="0.4"/>
+        <circle cx="530" cy="620" r="0.7" opacity="0.6"/>
+      </g>
+
+      <!-- 轨道（虚线） -->
+      <g fill="none" stroke="#2a3344" stroke-width="1" stroke-dasharray="3 5" opacity="0.7">
+        <!-- 水星 -->
+        <circle cx="400" cy="400" r="70"/>
+        <!-- 金星 -->
+        <circle cx="400" cy="400" r="105"/>
+        <!-- 地球 -->
+        <circle cx="400" cy="400" r="145"/>
+        <!-- 火星 -->
+        <circle cx="400" cy="400" r="190"/>
+        <!-- 木星 -->
+        <circle cx="400" cy="400" r="270"/>
+        <!-- 土星 -->
+        <circle cx="400" cy="400" r="345"/>
+      </g>
+
+      <!-- ========== 太阳 ========== -->
+      <defs>
+        <radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#fff8e0"/>
+          <stop offset="40%" stop-color="#ffcc33"/>
+          <stop offset="100%" stop-color="#ff8800"/>
+        </radialGradient>
+        <filter id="sunBlur" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4"/>
+        </filter>
+      </defs>
+      <!-- 太阳光晕 -->
+      <circle cx="400" cy="400" r="48" fill="#ffaa00" opacity="0.25" filter="url(#sunBlur)"/>
+      <circle cx="400" cy="400" r="36" fill="url(#sunGlow)"/>
+      <circle cx="400" cy="400" r="28" fill="#ffe066"/>
+
+      <!-- ========== 水星 88天 → 相对地球 10s 约为 2.41s ========== -->
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 400 400"
+          to="360 400 400"
+          dur="2.4s"
+          repeatCount="indefinite"/>
+        <circle cx="470" cy="400" r="5.5" fill="#a0a0a0"/>
+        <circle cx="470" cy="400" r="5.5" fill="#c0c0c0" opacity="0.4"/>
+      </g>
+
+      <!-- ========== 金星 225天 → 约 6.16s ========== -->
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 400 400"
+          to="360 400 400"
+          dur="6.2s"
+          repeatCount="indefinite"/>
+        <circle cx="505" cy="400" r="8" fill="#e8c878"/>
+        <circle cx="505" cy="400" r="8" fill="#f5d98a" opacity="0.35"/>
+      </g>
+
+      <!-- ========== 地球 + 月球 365天 → 10s ========== -->
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 400 400"
+          to="360 400 400"
+          dur="10s"
+          repeatCount="indefinite"/>
+        <!-- 地球 -->
+        <circle cx="545" cy="400" r="10" fill="#2a6db0"/>
+        <circle cx="545" cy="400" r="10" fill="#4a9ad4" opacity="0.35"/>
+        <!-- 月球（绕地球，约 27.3 天 → 10/13.37 ≈ 0.75s） -->
+        <g>
+          <animateTransform
+            attributeName="transform"
+            type="rotate"
+            from="0 545 400"
+            to="360 545 400"
+            dur="0.75s"
+            repeatCount="indefinite"/>
+          <circle cx="565" cy="400" r="3.2" fill="#c8c8c8"/>
+        </g>
+      </g>
+
+      <!-- ========== 火星 687天 → 约 18.8s ========== -->
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 400 400"
+          to="360 400 400"
+          dur="18.8s"
+          repeatCount="indefinite"/>
+        <circle cx="590" cy="400" r="7" fill="#c1440e"/>
+        <circle cx="590" cy="400" r="7" fill="#e05a2a" opacity="0.35"/>
+      </g>
+
+      <!-- ========== 木星 4333天 → 约 118.7s ========== -->
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 400 400"
+          to="360 400 400"
+          dur="119s"
+          repeatCount="indefinite"/>
+        <circle cx="670" cy="400" r="22" fill="#d8a060"/>
+        <!-- 简单条纹 -->
+        <ellipse cx="670" cy="393" rx="20" ry="3.5" fill="#c08040" opacity="0.6"/>
+        <ellipse cx="670" cy="407" rx="19" ry="3" fill="#b07030" opacity="0.5"/>
+        <circle cx="670" cy="400" r="22" fill="#e8b870" opacity="0.25"/>
+      </g>
+
+      <!-- ========== 土星 10759天 → 约 294.8s ========== -->
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 400 400"
+          to="360 400 400"
+          dur="295s"
+          repeatCount="indefinite"/>
+        <!-- 土星本体 -->
+        <circle cx="745" cy="400" r="17" fill="#e8d070"/>
+        <!-- 环（倾斜椭圆） -->
+        <ellipse cx="745" cy="400" rx="30" ry="6" fill="none" stroke="#d0c060" stroke-width="3.5" opacity="0.85"/>
+        <ellipse cx="745" cy="400" rx="30" ry="6" fill="none" stroke="#a09040" stroke-width="1.2" opacity="0.5"/>
+        <circle cx="745" cy="400" r="17" fill="#f0e080" opacity="0.3"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:#ffe066"></i>太阳</span>
+    <span><i style="background:#a0a0a0"></i>水星</span>
+    <span><i style="background:#e8c878"></i>金星</span>
+    <span><i style="background:#2a6db0"></i>地球 + 月球</span>
+    <span><i style="background:#c1440e"></i>火星</span>
+    <span><i style="background:#d8a060"></i>木星</span>
+    <span><i style="background:#e8d070"></i>土星</span>
+  </div>
+  <p class="tip">公转周期按真实比例缩放（地球一年 ≈ 10 秒）</p>
+</body>
+</html>

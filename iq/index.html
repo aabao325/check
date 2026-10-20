@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>大模型智商检测 — Aabao.AI 工具箱</title>
+<meta name="description" content="手动检测大模型是否降智：让模型用 SVG 画动画（鹈鹕骑车、太阳系、时钟…），与标准答案左右对比，AI 视觉裁判自动评审，一键分享报告。支持自配 URL / 密钥 / 模型 / 思考档位。">
+<meta name="robots" content="index, follow">
+<link rel="icon" type="image/svg+xml" href="../og-cover.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./iq-assets/styles.css?v=24">
+</head>
+<body>
+<div class="shell">
+
+  <!-- NAV -->
+  <nav>
+    <div class="wrap nav-inner">
+      <a class="brand" href="../">
+        <svg class="glyph" viewBox="0 0 200 200" fill="none" role="img" aria-label="Aabao.AI"><defs><linearGradient id="navg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4285F4"/><stop offset="33%" stop-color="#9B72CB"/><stop offset="66%" stop-color="#EA4986"/><stop offset="100%" stop-color="#FF8A3D"/></linearGradient></defs><rect x="22" y="22" width="156" height="156" rx="48" fill="none" stroke="url(#navg)" stroke-width="13"/><circle cx="72" cy="100" r="18" fill="url(#navg)"/><circle cx="128" cy="100" r="18" fill="url(#navg)"/></svg>
+        <span class="brand-name">Aabao.AI</span>
+      </a>
+      <div class="nav-links">
+        <a href="../">首页</a>
+        <div class="nav-links-item" id="modelDrop">
+          <button type="button" class="nav-drop-btn" id="modelDropBtn" aria-haspopup="true" aria-expanded="false">
+            大模型检测
+            <svg class="dc-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO（靠左） -->
+  <header class="hero">
+    <div class="wrap">
+      <span class="eyebrow"><span class="pip"></span> 让模型画 SVG，看看它降智了没</span>
+      <h1>大模型<span class="accent">智商检测</span></h1>
+      <p>让模型用 SVG 画一段动画，与「正常智商」的标准答案对比，AI 视觉裁判自动评审，还能一键分享报告。</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="layout">
+
+      <!-- ============ 主区（左侧一大列）：① 配置 → ② 题目 → ③ 对比，上下堆叠 ============ -->
+      <div class="main-col">
+
+        <!-- ① 配置 -->
+        <section class="section">
+          <div class="sec-title"><span class="n">1</span>配置你的模型<span class="sub">URL / 密钥 / 模型 / 思考档位</span></div>
+          <div class="panel-card">
+            <div class="cfg-grid">
+              <div class="field c2">
+                <label>接口地址 <span class="tip">只填基础地址，右侧选接口路径</span></label>
+                <div class="ep-group">
+                  <input id="endpoint" type="text" placeholder="https://你的中转站" autocomplete="off" spellcheck="false">
+                  <select id="epPath" aria-label="接口路径"></select>
+                </div>
+                <div class="proto-hint" id="protoHint"></div>
+              </div>
+              <div class="field c2">
+                <label>模型名</label>
+                <input id="model" type="text" placeholder="如 grok-4.5 / gpt-5.5 / claude-opus-4-8" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="field c2">
+                <label>API 密钥</label>
+                <input id="apiKey" type="password" placeholder="sk-...（默认不保存；可在右侧「配置库」一键存到本地浏览器，方便定期复检）" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="field">
+                <label>思考档位 <span class="tip">影响很大</span></label>
+                <select id="think"></select>
+              </div>
+              <div class="field">
+                <label>max_tokens <span class="tip">建议 ≥ 8192</span></label>
+                <input id="maxTokens" type="number" value="8192" min="1024" step="1024">
+              </div>
+            </div>
+            <div class="cfg-note">请求由你的浏览器直连目标接口，不经本站服务器，密钥不外传。</div>
+          </div>
+        </section>
+
+        <!-- ② 题目选择（可多选） → 开始检测 -->
+        <section class="section">
+          <div class="sec-title"><span class="n">2</span>选择题目<span class="sub">可多选 · 点「开始检测」会并发生成所有已选题</span></div>
+          <div class="q-grid" id="qGrid"></div>
+          <div class="run-row">
+            <button class="btn btn-accent btn-run" id="runBtn" type="button">🚀 开始检测</button>
+            <button class="btn btn-ghost" id="summaryBtn" type="button" style="display:none">🤖 AI 视觉总结</button>
+            <button class="btn btn-ghost" id="shareBtn" type="button" style="display:none">🔗 分享报告</button>
+          </div>
+          <!-- 分享面板：点「分享报告」就地展开。
+               ⚠️ markup 与 check / modeltrace 两站的同款面板**逐字一致** —— 三站是
+                  三份独立文件、没有共用组件，改文案时三处一起改，否则「统一」就破了。 -->
+          <div class="share-panel" id="sharePanel" hidden>
+            <div class="share-panel-title">报告里要不要带上你的中转站地址？</div>
+            <label class="share-opt">
+              <input type="radio" name="iqUrlMode" value="host" checked>
+              <span class="share-opt-body">
+                <b>仅域名</b><span class="share-opt-sub" id="shareHostSub">—</span>
+                <span class="share-opt-note">别人只看到你用哪一家，看不到具体端点</span>
+              </span>
+            </label>
+            <label class="share-opt">
+              <input type="radio" name="iqUrlMode" value="none">
+              <span class="share-opt-body">
+                <b>不显示地址</b>
+                <span class="share-opt-note">报告里不出现任何中转站地址</span>
+              </span>
+            </label>
+            <div class="share-panel-foot">点下方按钮会把这份报告存到本站服务器，换一个短链。检测过程本身仍不经过服务器。</div>
+            <div class="share-panel-acts">
+              <button class="btn btn-accent" id="shareGoBtn" type="button">生成并复制链接</button>
+              <button class="btn btn-ghost" id="shareCancelBtn" type="button">取消</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ③ 对比展示 -->
+        <section class="section" id="compareSection">
+
+          <!-- 未选题时的占位引导 -->
+          <div class="center-placeholder" id="centerPlaceholder">
+            <div class="cp-emoji">🎨</div>
+            <div class="cp-title">选一道或多道题，开始对比检测</div>
+            <div class="cp-sub">在上方填好接口与模型、勾选一道或多道 SVG 题（题卡右上角勾选框），点「开始检测」并发生成。<br>状态与结论直接标在题卡上，切换/多选都不会中断正在生成的任务。</div>
+          </div>
+
+          <!-- 选中任务的对比舞台 -->
+          <div class="compare-wrap" id="compareWrap" style="display:none">
+            <div class="compare-head">
+              <div class="compare-title" id="compareTitle"></div>
+            </div>
+            <div class="run-status" id="runStatus"></div>
+            <div class="compare-prompt"><b>题目：</b><span id="comparePrompt"></span></div>
+
+            <!-- ★ AI 视觉裁判评审结果：最显眼位置，检测完自动生成（按钮在上方「开始检测」旁） -->
+            <div class="verdict-card" id="summaryBox">
+              <div class="vc-head">
+                <div class="vc-title"><span class="vc-em">🤖</span>AI 视觉裁判评审</div>
+                <div class="vc-verdict" id="summaryVerdict"></div>
+              </div>
+              <div class="vc-body sm-body" id="summaryBody"></div>
+            </div>
+
+            <div class="compare-grid">
+              <div class="stage">
+                <div class="stage-bar left">✅ 正常智商（标准答案）<span class="tag">BASELINE</span></div>
+                <div id="stageLeft"><div class="stage-empty">选题后加载基线…</div></div>
+                <div id="codeLeft"></div>
+              </div>
+              <div class="stage">
+                <div class="stage-bar right">🤖 你的模型输出<span class="tag" id="modelTag">MODEL</span></div>
+                <div id="stageRight"><div class="stage-empty">暂无结果</div></div>
+                <div id="codeRight"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ============ 配置库 + 历史：悬浮到正文右侧的留白处（顶部与①配置齐平） ============ -->
+      <aside class="side-rail">
+        <div class="side-card">
+          <div class="side-head">
+            <div class="side-title"><span class="em">💾</span>配置库</div>
+          </div>
+          <div class="cfg-store-head">
+            <input class="lbl-input" id="cfgLabel" type="text" placeholder="备注（可留空，默认用域名）">
+            <button class="btn btn-ghost btn-sm" id="saveCfgBtn" type="button">保存</button>
+          </div>
+          <div class="cfg-chips" id="cfgChips"></div>
+        </div>
+
+        <div class="side-card">
+          <div class="side-head">
+            <div class="side-title"><span class="em">🕘</span>检测历史</div>
+            <button class="btn btn-ghost btn-sm" id="clearHistBtn" type="button">清空</button>
+          </div>
+          <div class="hist-list" id="histList"></div>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>© 2026 Aabao.AI · 大模型智商检测 · <a href="../">返回首页</a> · <a href="../check/">真伪检测</a> · <a href="../modeltrace/">归因检测</a></p>
+      <p style="margin-top:6px">🔓 开源仓库：<a href="https://github.com/aabao325/check" target="_blank" rel="noopener">github.com/aabao325/check</a>（MIT License，欢迎 Star / 提 Issue / 自行部署）</p>
+      <p style="margin-top:6px">题目灵感源自 <a href="https://github.com/simonw/pelican-bicycle" target="_blank" rel="noopener">Simon Willison 的 pelican-bicycle 基准</a>。配置库与历史仅存本机浏览器，不上传。</p>
+    </div>
+  </footer>
+
+</div>
+<script src="../nav-drop.js"></script>
+<script type="module" src="./iq-assets/app.js?v=23"></script>
+<script>
+  // 「模型检测」下拉：iq 页面的当前项是智商检测，用于菜单内高亮
+  if (window.initModelDrop) window.initModelDrop('modelDrop', 'modelDropBtn', { pathPrefix: '../', current: '智商检测', iconBase: '../check/assets/icons/' });
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# 私密配置（管理员密码哈希）——只提交 api/config.example.php
+api/config.php
+
+# 运行时数据：中转站档案 / 管理员会话 / 登录失败计数 / 限流计数
+data/runtime/

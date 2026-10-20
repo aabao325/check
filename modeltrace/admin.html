@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>指纹采集台 · 大模型归因检测</title>
+<link rel="icon" type="image/svg+xml" href="../og-cover.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./assets/styles.css?v=13">
+<link rel="stylesheet" href="./assets/admin.css?v=13">
+</head>
+<body>
+<div class="shell">
+  <nav>
+    <div class="wrap nav-inner">
+      <a class="brand" href="./">
+        <svg class="glyph" viewBox="0 0 200 200" fill="none" role="img" aria-label="Aabao.AI"><defs><linearGradient id="navg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4285F4"/><stop offset="33%" stop-color="#9B72CB"/><stop offset="66%" stop-color="#EA4986"/><stop offset="100%" stop-color="#FF8A3D"/></linearGradient></defs><rect x="22" y="22" width="156" height="156" rx="48" fill="none" stroke="url(#navg)" stroke-width="13"/><circle cx="72" cy="100" r="18" fill="url(#navg)"/><circle cx="128" cy="100" r="18" fill="url(#navg)"/></svg>
+        <span class="brand-name">指纹采集台</span>
+      </a>
+      <div class="nav-links">
+        <a href="./">← 返回检测页</a>
+        <button type="button" class="btn btn-ghost btn-sm" id="logoutBtn" hidden>退出登录</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 登录 -->
+  <main class="wrap" id="loginView">
+    <section class="section login-wrap">
+      <div class="panel login-card">
+        <div class="sec-title"><span class="n">🔒</span>管理员登录</div>
+        <p class="muted-p">采集台用于给新模型建指纹、给中转站建档。连续输错 5 次会锁定 15 分钟。</p>
+        <div class="field"><label for="pwd">密码</label><input id="pwd" type="password" autocomplete="current-password"></div>
+        <div class="run-row"><button class="btn btn-accent" id="loginBtn" type="button">登录</button></div>
+        <div id="loginMsg"></div>
+      </div>
+    </section>
+  </main>
+
+  <main class="wrap" id="appView" hidden>
+    <header class="hero" style="padding-bottom:0">
+      <h1 style="font-size:28px">指纹<span class="accent">采集台</span></h1>
+      <p>跑 12 个环境 × 3 条 = <b>36 条</b>固定套件，采集一个接口的完整数字指纹。采到的数据可以<b>存成中转站档案</b>做横向比较，也可以<b>作为官方基线并入指纹库</b>、导出文件提交进仓库后让前台支持新模型。</p>
+    </header>
+
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="collect" role="tab">① 采集</button>
+      <button class="tab" data-tab="archives" role="tab">② 档案 <span class="badge" id="archiveCount">0</span></button>
+      <button class="tab" data-tab="bank" role="tab">③ 指纹库</button>
+    </div>
+
+    <!-- 右侧悬浮栏：配置库。
+         与检测界面（index.html）是**同一套 markup 与样式**（样式在 styles.css 里，
+         这里已加载），也是**同一份数据**（localStorage 的 mt.savedConfigs.v1）。
+         所以两处看到的是同一个配置库：这边存一条，检测页立刻也有。
+
+         ⚠️ class / id 刻意与检测页**逐字相同**（cfgStore / cfgToggle / cfgBody /
+            cfgSaved / cfgLabel / cfgSaveBtn），这样万一以后想把这块抽成共用组件，
+            两边能直接对齐；也让「这是同一套交互」在代码层面一眼可见。
+         ⚠️ 窄屏（宽度不够放悬浮栏）时由 styles.css 的 @media 规则降级成正文内联卡片，
+            与检测页行为一致。 -->
+    <div class="side-rail" id="sideRail">
+      <aside class="cfg-store" id="cfgStore" aria-label="配置库">
+        <button class="cfg-store-head" id="cfgToggle" aria-expanded="true">
+          <span class="cfg-store-title">🗂️ 配置库</span>
+          <span class="cfg-caret">▾</span>
+        </button>
+        <div class="cfg-store-body" id="cfgBody">
+          <div class="cfg-saved" id="cfgSaved"></div>
+          <div class="cfg-save-row">
+            <input id="cfgLabel" maxlength="40" placeholder="备注标签（如：中转站A）" autocomplete="off">
+            <button class="btn btn-accent btn-sm" id="cfgSaveBtn">💾 保存当前</button>
+          </div>
+          <div class="cfg-store-tip">与检测界面共用同一份 · 仅存于本机浏览器</div>
+          <!-- 配置库自己的提示位：保存/导入/删除都在这里就地回话，不用飘浮层 -->
+          <div id="cfgMsg"></div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ① 采集 -->
+    <section class="section tabpane" data-pane="collect">
+      <div class="panel">
+        <div class="cfg-grid">
+          <div class="field full"><label for="cBase">接口地址 <span class="tip">只填基础地址，右侧选接口路径</span></label>
+            <div class="ep-group">
+              <input id="cBase" type="text" placeholder="https://你的中转站" autocomplete="off" spellcheck="false">
+              <select id="cPath" aria-label="接口路径"></select>
+            </div>
+            <div id="cCustomPathRow" hidden style="margin-top:8px"><input id="cCustomPath" type="text" placeholder="/v1/xxx 或完整地址 https://.../v1/xxx" autocomplete="off" spellcheck="false"></div>
+            <div class="cfg-note" id="cPathHint" style="margin-top:7px"></div></div>
+          <div class="field"><label for="cKey">API Key <span class="tip">只在本机内存里用，不会存进档案</span></label><input id="cKey" type="password" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label for="cModel">请求用的模型名</label><input id="cModel" type="text" placeholder="claude-opus-5" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label for="cLabel">档案名</label><input id="cLabel" type="text" maxlength="60" placeholder="如：某某中转 · opus-5 · 10 月"></div>
+          <div class="field"><label>接口类型</label>
+            <div class="seg" id="cKind"><button type="button" data-v="relay" class="on">中转站</button><button type="button" data-v="official">官方直连</button></div></div>
+          <div class="field"><label for="cConc">并发 <span class="tip">上限 32；填多了会在上方明说</span></label><input id="cConc" type="number" min="1" max="32" step="1" value="2"></div>
+          <div class="field"><label for="cNote">备注</label><input id="cNote" type="text" maxlength="500" placeholder="可选：渠道、价格、分组…"></div>
+        </div>
+        <div class="run-row">
+          <button class="btn btn-accent" id="collectBtn" type="button">开始采集 36 条</button>
+          <button class="btn btn-ghost" id="collectStop" type="button" hidden>停止</button>
+          <button class="btn btn-ghost" id="collectRetry" type="button" hidden>补采失败的条目</button>
+          <span class="cfg-note" style="margin:0">每条约 1~2k 输出 token，36 条全部跑完约 5~15 分钟。</span>
+        </div>
+        <div id="collectMsg"></div>
+      </div>
+
+      <div class="panel" id="gridPanel" hidden>
+        <div class="prog-head"><div class="prog-stats" id="cStats"></div></div>
+        <div class="env-grid" id="envGrid"></div>
+      </div>
+
+      <div id="collectResult" hidden>
+        <div class="panel save-bar">
+          <div><b>采集完成</b> <span class="muted" id="saveSummary"></span></div>
+          <div class="run-row" style="margin:0">
+            <button class="btn btn-accent" id="saveBtn" type="button">💾 保存为档案</button>
+            <button class="btn btn-ghost" id="exportRowsBtn" type="button">导出原始数据</button>
+          </div>
+        </div>
+        <div class="verdict" id="cVerdict" style="margin-top:14px"></div>
+        <div class="v-foot" id="cVerdictFoot"></div>
+        <div class="viz" id="cOverlay"></div>
+        <div class="viz" id="cCompass"></div>
+      </div>
+    </section>
+
+    <!-- ② 档案 -->
+    <section class="section tabpane" data-pane="archives" hidden>
+      <div class="panel">
+        <div class="prog-head">
+          <div class="muted" id="archiveMeta"></div>
+          <div class="run-row" style="margin:0"><input id="archiveFilter" class="filter" placeholder="筛选：档案名 / 域名 / 模型" autocomplete="off"><button class="btn btn-ghost btn-sm" id="archiveRefresh" type="button">刷新</button></div>
+        </div>
+        <div id="archiveTable"></div>
+      </div>
+      <div id="archiveDetail" hidden></div>
+    </section>
+
+    <!-- ③ 指纹库 -->
+    <section class="section tabpane" data-pane="bank" hidden>
+      <div class="panel doc">
+        <h3>怎么让前台支持一个新模型</h3>
+        <ol>
+          <li>在「① 采集」里用<b>官方直连</b>跑满 36 条，保存档案（接口类型选「官方直连」）。</li>
+          <li>在下面勾选要并入的官方档案，填好模型 id 和家族，点「重建指纹库」——浏览器里跑完整交叉验证（约 1~3 分钟）。</li>
+          <li>看一眼新库的交叉验证准确率，没问题就「下载 unified_bank.json」，覆盖仓库里的 <code>modeltrace/data/bank/unified_bank.json</code> 并提交。前台的「支持的模型」列表会随之更新。</li>
+        </ol>
+        <div class="callout"><p>为什么不在这里直接发布？指纹库决定所有访客看到的结论。走仓库提交意味着每次变更都可审查、可回滚，管理员密码即使泄露也改不了线上结论。</p></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="side-title">当前指纹库</div>
+        <div class="muted" style="font-size:11.5px;margin-bottom:8px">点模型右上角的 <b>×</b> 可把它从下次重建的结果里移除（只改产出，源数据仍在 reference.json，刷新即恢复）；<b>↺</b> 表示已移除，点一下取消。</div>
+        <div id="bankCurrent"></div>
+      </div>
+      <div class="panel" id="bankImportPanel" style="margin-top:14px" hidden>
+        <div class="side-title">待并入指纹库的档案</div>
+        <div class="muted" style="font-size:11.5px;margin-bottom:8px">从「② 档案」里点「导入指纹库」加进来的。下面是最终写进库的模型 id 与家族，可改。</div>
+        <div id="bankImportList"></div>
+        <div id="bankImportMsg"></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="side-title">可并入的官方档案（36 条齐全的「官方直连」档案）</div>
+        <div id="bankCandidates"></div>
+        <div class="run-row">
+          <button class="btn btn-accent" id="rebuildBtn" type="button" disabled>重建指纹库</button>
+          <span class="cfg-note" style="margin:0" id="rebuildMsg"></span>
+        </div>
+        <div class="slot-bar" id="rebuildBar" hidden style="margin-top:12px;height:6px"><i></i></div>
+        <div id="rebuildResult"></div>
+      </div>
+    </section>
+  </main>
+  <footer><div class="wrap">指纹采集台 · 请求由浏览器直连目标接口 · 档案只保存数字与统计，不保存 API Key</div></footer>
+</div>
+<script type="module" src="./assets/admin.js?v=13"></script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>雨中撑伞行走的小人</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a202c;
+      font-family: system-ui, sans-serif;
+    }
+    .container {
+      text-align: center;
+    }
+    h1 {
+      color: #a0aec0;
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      font-weight: 500;
+    }
+    svg {
+      display: block;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      background: linear-gradient(to bottom, #2d3748 0%, #4a5568 60%, #2d3748 100%);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🌧️ 雨中撑伞向前走 · SVG 动画</h1>
+    <svg id="scene" width="800" height="480" viewBox="0 0 800 480">
+      <!-- 远景雾感 -->
+      <defs>
+        <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2c3e50"/>
+          <stop offset="100%" stop-color="#4a5568"/>
+        </linearGradient>
+        <linearGradient id="groundGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#1a202c"/>
+          <stop offset="100%" stop-color="#2d3748"/>
+        </linearGradient>
+        <!-- 雨滴渐变 -->
+        <linearGradient id="rainGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#90cdf4" stop-opacity="0.9"/>
+          <stop offset="100%" stop-color="#63b3ed" stop-opacity="0.3"/>
+        </linearGradient>
+      </defs>
+
+      <!-- 天空背景 -->
+      <rect width="800" height="420" fill="url(#skyGrad)"/>
+
+      <!-- 地面 -->
+      <rect y="420" width="800" height="60" fill="url(#groundGrad)"/>
+      <!-- 地面湿润反光 -->
+      <rect y="420" width="800" height="8" fill="#2b6cb0" opacity="0.25"/>
+
+      <!-- 雨滴容器 -->
+      <g id="rainLayer"></g>
+
+      <!-- 人物组（会移动） -->
+      <g id="person">
+        <!-- 伞 -->
+        <g id="umbrella">
+          <!-- 伞柄 -->
+          <line x1="0" y1="-95" x2="0" y2="5" stroke="#5d4037" stroke-width="5" stroke-linecap="round"/>
+          <!-- 伞面（弧形） -->
+          <path d="M -75 -95 
+                   Q -40 -155 0 -160 
+                   Q 40 -155 75 -95 
+                   L 65 -90 
+                   Q 30 -140 0 -145 
+                   Q -30 -140 -65 -90 Z" 
+                fill="#e53e3e" stroke="#c53030" stroke-width="2"/>
+          <!-- 伞骨装饰 -->
+          <path d="M0 -160 Q -35 -130 -65 -95" fill="none" stroke="#c53030" stroke-width="1.5" opacity="0.6"/>
+          <path d="M0 -160 Q 35 -130 65 -95" fill="none" stroke="#c53030" stroke-width="1.5" opacity="0.6"/>
+          <path d="M0 -160 L0 -95" fill="none" stroke="#c53030" stroke-width="1.5" opacity="0.5"/>
+        </g>
+
+        <!-- 头部 -->
+        <circle cx="0" cy="-55" r="18" fill="#fbd38d" stroke="#ed8936" stroke-width="1.5"/>
+        <!-- 简单表情 -->
+        <circle cx="-6" cy="-58" r="2.2" fill="#2d3748"/>
+        <circle cx="6" cy="-58" r="2.2" fill="#2d3748"/>
+        <path d="M-5 -48 Q0 -44 5 -48" fill="none" stroke="#c05621" stroke-width="1.8" stroke-linecap="round"/>
+
+        <!-- 身体（衣服） -->
+        <path d="M-14 -35 Q0 -38 14 -35 L12 25 Q0 30 -12 25 Z" fill="#3182ce" stroke="#2b6cb0" stroke-width="1.5"/>
+        
+        <!-- 手臂（抬起撑伞） -->
+        <path d="M-8 -20 Q-5 -50 0 -95" fill="none" stroke="#fbd38d" stroke-width="6" stroke-linecap="round"/>
+        <!-- 另一只手自然摆动（可选，简化固定） -->
+        <path d="M8 -18 Q18 5 12 25" fill="none" stroke="#fbd38d" stroke-width="5.5" stroke-linecap="round" id="freeArm"/>
+
+        <!-- 腿部组 -->
+        <g id="legs">
+          <!-- 左腿 -->
+          <g id="leftLeg">
+            <line x1="0" y1="25" x2="-18" y2="70" stroke="#2d3748" stroke-width="7" stroke-linecap="round"/>
+            <!-- 鞋 -->
+            <ellipse cx="-20" cy="72" rx="9" ry="4" fill="#1a202c"/>
+          </g>
+          <!-- 右腿 -->
+          <g id="rightLeg">
+            <line x1="0" y1="25" x2="18" y2="70" stroke="#2d3748" stroke-width="7" stroke-linecap="round"/>
+            <ellipse cx="20" cy="72" rx="9" ry="4" fill="#1a202c"/>
+          </g>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <script>
+    const svg = document.getElementById('scene');
+    const rainLayer = document.getElementById('rainLayer');
+    const person = document.getElementById('person');
+    const leftLeg = document.getElementById('leftLeg');
+    const rightLeg = document.getElementById('rightLeg');
+    const freeArm = document.getElementById('freeArm');
+
+    // 配置
+    const DROP_COUNT = 180;
+    const UMBRELLA_HALF_WIDTH = 78;   // 伞挡住的半宽
+    const UMBRELLA_TOP_Y = -160;      // 相对人物的伞顶 y
+    const UMBRELLA_BOTTOM_Y = -90;    // 伞沿 y
+    const GROUND_Y = 420;
+    const PERSON_BASE_Y = 350;
+
+    // 雨滴数组
+    const drops = [];
+
+    // 创建雨滴
+    function createDrop() {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('stroke', 'url(#rainGrad)');
+      line.setAttribute('stroke-width', (1.2 + Math.random() * 1.5).toFixed(1));
+      line.setAttribute('stroke-linecap', 'round');
+      rainLayer.appendChild(line);
+      return {
+        el: line,
+        x: Math.random() * 800,
+        y: Math.random() * -500 - 20,
+        speed: 4 + Math.random() * 5.5,
+        len: 12 + Math.random() * 16
+      };
+    }
+
+    for (let i = 0; i < DROP_COUNT; i++) {
+      drops.push(createDrop());
+    }
+
+    // 人物状态
+    let personX = 120;
+    let walkPhase = 0;
+    const walkSpeed = 0.085;        // 步频
+    const moveSpeed = 1.15;         // 向前移动速度
+
+    function update() {
+      // 更新人物位置（向前走，循环）
+      personX += moveSpeed;
+      if (personX > 860) personX = -60;
+
+      // 行走相位
+      walkPhase += walkSpeed;
+      const legAngle = Math.sin(walkPhase) * 28;          // 左右腿摆动幅度
+      const armSwing = Math.sin(walkPhase + Math.PI) * 12;
+      const bob = Math.sin(walkPhase * 2) * 2.5;          // 轻微上下颠簸
+
+      // 应用人物变换
+      person.setAttribute('transform', `translate(${personX}, ${PERSON_BASE_Y + bob})`);
+
+      // 腿部旋转（以髋部为中心）
+      leftLeg.setAttribute('transform', `rotate(${legAngle}, 0, 25)`);
+      rightLeg.setAttribute('transform', `rotate(${-legAngle}, 0, 25)`);
+
+      // 自由手臂轻微摆动
+      freeArm.setAttribute('d', `M8 -18 Q${18 + armSwing * 0.3} ${5 + armSwing * 0.4} ${12 + armSwing * 0.2} 25`);
+
+      // 更新雨滴
+      const umbrellaCenterX = personX;
+      const absUmbrellaTop = PERSON_BASE_Y + bob + UMBRELLA_TOP_Y;
+      const absUmbrellaBottom = PERSON_BASE_Y + bob + UMBRELLA_BOTTOM_Y;
+
+      for (const d of drops) {
+        d.y += d.speed;
+
+        // 判断是否在伞的正上方区域
+        const underUmbrella = Math.abs(d.x - umbrellaCenterX) < UMBRELLA_HALF_WIDTH;
+
+        if (underUmbrella) {
+          // 如果雨滴已经到达伞面附近，就把它重置到顶部（被挡住）
+          if (d.y > absUmbrellaTop - 5 && d.y < absUmbrellaBottom + 30) {
+            d.y = -30 - Math.random() * 200;
+            d.x = Math.random() * 800;
+            // 轻微横向漂移
+            d.x += (Math.random() - 0.5) * 40;
+          }
+        }
+
+        // 落到地面就重置
+        if (d.y > GROUND_Y + 10) {
+          d.y = -20 - Math.random() * 300;
+          d.x = Math.random() * 800;
+        }
+
+        // 更新 SVG 线段（斜向下落更有雨感）
+        const tilt = 2 + Math.random() * 1.5;
+        d.el.setAttribute('x1', d.x);
+        d.el.setAttribute('y1', d.y);
+        d.el.setAttribute('x2', d.x + tilt);
+        d.el.setAttribute('y2', d.y + d.len);
+      }
+
+      requestAnimationFrame(update);
+    }
+
+    // 启动动画
+    requestAnimationFrame(update);
+  </script>
+</body>
+</html>

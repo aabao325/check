@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none" role="img" aria-labelledby="t">
+<title id="t">aabao Portal</title>
+<!-- Portal – 圆角方框 Gateway + aa 双点 -->
+<defs>
+  <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#4285F4"/>
+    <stop offset="33%" stop-color="#9B72CB"/>
+    <stop offset="66%" stop-color="#EA4986"/>
+    <stop offset="100%" stop-color="#FF8A3D"/>
+  </linearGradient>
+</defs>
+<rect x="22" y="22" width="156" height="156" rx="48" fill="none" stroke="url(#g)" stroke-width="13"/>
+<circle cx="72" cy="100" r="18" fill="url(#g)"/>
+<circle cx="128" cy="100" r="18" fill="url(#g)"/>
+</svg>

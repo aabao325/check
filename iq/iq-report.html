@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<!-- ⚠️ 必须在任何相对地址之前定下基准路径。
+     分享短链是 /iq/s/<id>，那一层的目录深度与报告页不同 ——
+     浏览器按页面地址解析 './iq-assets/...' 会变成 /iq/s/iq-assets/...（404），页面直接白给。
+     本页既要能在 /iq/iq-report 打开（本地直开文件、旧链接），也要能在 /iq/s/<id> 打开，
+     所以基准不能写死，用一段内联脚本按当前路径算出站点目录：
+       /iq/s/a1b2c3d4e   → /iq/
+       /iq/iq-report     → /iq/
+     ⚠️ 脚本必须排在**所有相对地址之前**（<base> 只影响它之后出现的相对地址），
+        所以放在 head 顶部；但 charset 要排在它前面 —— 规范要求 charset 落在前
+        1024 字节内，注释本身就有近 1KB，压在 charset 前面会让它超限。 -->
+<script>
+(function () {
+  var p = location.pathname;
+  var base = /\/s\/[^/]*\/?$/.test(p)
+    ? p.replace(/\/s\/[^/]*\/?$/, '/')            // 分享短链
+    : p.replace(/\/[^/]*$/, '/');                 // 普通页：去掉文件名
+  var b = document.createElement('base');
+  b.href = base;
+  document.head.appendChild(b);
+})();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智商检测报告 — Aabao.AI</title>
+<!-- 分享页不进搜索引擎：报告内容按 id 从后端取，索引它只会拿到空页面 -->
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/svg+xml" href="../og-cover.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./iq-assets/styles.css?v=24">
+<!-- PNG 导出 -->
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+</head>
+<body>
+<div class="shell">
+
+  <nav>
+    <div class="wrap nav-inner">
+      <a class="brand" href="../">
+        <svg class="glyph" viewBox="0 0 200 200" fill="none" role="img" aria-label="Aabao.AI"><defs><linearGradient id="navg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#4285F4"/><stop offset="33%" stop-color="#9B72CB"/><stop offset="66%" stop-color="#EA4986"/><stop offset="100%" stop-color="#FF8A3D"/></linearGradient></defs><rect x="22" y="22" width="156" height="156" rx="48" fill="none" stroke="url(#navg)" stroke-width="13"/><circle cx="72" cy="100" r="18" fill="url(#navg)"/><circle cx="128" cy="100" r="18" fill="url(#navg)"/></svg>
+        <span class="brand-name">Aabao.AI</span>
+      </a>
+      <div class="nav-links">
+        <a href="../">首页</a>
+        <a href="./" class="active">智商检测</a>
+        <a href="../check/">真伪检测</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="wrap" style="padding-top:20px">
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" id="pngBtn" type="button">📷 导出图片</button>
+      <button class="btn btn-ghost btn-sm" id="copyBtn" type="button">🔗 复制本页链接</button>
+      <a class="btn btn-accent btn-sm" href="./" style="text-decoration:none">↩ 我也要测</a>
+    </div>
+
+    <!-- 需要被截图导出的报告区 -->
+    <div id="reportArea">
+      <!-- 顶部标题条：大标题 + slogan + 完整域名 -->
+      <div class="rep-titlebar">
+        <div class="rep-brand">
+          <svg class="rep-logo" width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true"><defs><linearGradient id="rsg" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4285F4"/><stop offset="33%" stop-color="#9B72CB"/><stop offset="66%" stop-color="#EA4986"/><stop offset="100%" stop-color="#FF8A3D"/></linearGradient></defs><path d="M12 1.6 20.4 4.9V11c0 5.3-3.6 9.4-8.4 11.3C7.2 20.4 3.6 16.3 3.6 11V4.9Z" fill="url(#rsg)"/><path d="M8 12.1l2.7 2.7L16.2 9" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div class="rep-brand-txt">
+            <div class="rep-title">大模型智商检测</div>
+            <div class="rep-slogan">让模型用 SVG 画一段动画，与标准答案对比、AI 视觉裁判评审它降智了没</div>
+          </div>
+        </div>
+        <!-- ⚠️ 显示文字不带 `https://`（一串域名里的协议头只是噪音），但 href 必须保留完整地址 ——
+             扒掉协议的 href 会被当成相对路径，解析成 /iq/https://aabao.ai。
+             前面那个「站点首页」小标签是**刻意**的：本页底部还有一个二维码，下面是这份报告的
+             短链（aabao.ai/iq/s/xxx）。两条都是等宽小字的域名，不加区分会让人以为顶部这条
+             就是本次报告地址 —— 点进去却是首页。 -->
+        <a class="rep-domain" href="https://aabao.ai/iq" target="_blank" rel="noopener"><span class="rep-domain-tag">站点首页</span>aabao.ai/iq</a>
+      </div>
+
+      <!-- 摘要条：检测项 / 模型 / 档位 / 协议 / 目标站 / 检测时间 -->
+      <div class="rep-summary-bar" id="repMeta"></div>
+
+      <!-- 题目 -->
+      <div class="panel-card" style="margin-bottom:14px">
+        <div style="font-size:12.5px;color:var(--ink-soft)"><b style="color:var(--claude)">题目：</b><span id="repPrompt"></span></div>
+      </div>
+
+      <!-- AI 总结（放在图片上方，第一时间看到结论） -->
+      <div class="verdict-card show" id="repSummary" style="margin-bottom:16px">
+        <div class="vc-head">
+          <div class="vc-title"><span class="vc-em">🤖</span>AI 视觉裁判评审</div>
+          <div class="vc-verdict" id="repSummaryVerdict"></div>
+        </div>
+        <div class="vc-body sm-body" id="repSummaryBody"></div>
+      </div>
+
+      <!-- 左右对比图 -->
+      <div class="compare-grid">
+        <div class="stage">
+          <div class="stage-bar left">✅ 正常智商（标准答案）<span class="tag">BASELINE</span></div>
+          <div id="repLeft"><div class="stage-empty">加载中…</div></div>
+          <div id="repCodeLeft"></div>
+        </div>
+        <div class="stage">
+          <div class="stage-bar right">🤖 被测模型输出<span class="tag" id="repModelTag">MODEL</span></div>
+          <div id="repRight"><div class="stage-empty">加载中…</div></div>
+          <div id="repCodeRight"></div>
+        </div>
+      </div>
+
+      <!-- 底部二维码：扫码看这份报告 -->
+      <div class="qr-block" id="qrBlock" style="display:none">
+        <div class="qr-code" id="qrCode"></div>
+        <div class="qr-text" id="qrHint"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>© 2026 Aabao.AI · 大模型智商检测报告 · <a href="./">去检测</a> · <a href="../">返回首页</a></p>
+    </div>
+  </footer>
+
+</div>
+<script src="./iq-assets/qrcode.min.js"></script>
+<script type="module" src="./iq-assets/report.js?v=12"></script>
+</body>
+</html>

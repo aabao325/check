@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>小孩荡秋千 · 单摆动画</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(180deg, #87CEEB 0%, #B0E0E6 60%, #98D8C8 100%);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      overflow: hidden;
+    }
+    h1 {
+      color: #2c3e50;
+      font-size: 1.4rem;
+      margin-bottom: 12px;
+      text-shadow: 0 1px 2px rgba(255,255,255,0.6);
+    }
+    .stage {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+      padding: 8px;
+    }
+    svg {
+      display: block;
+      border-radius: 12px;
+    }
+    /* 秋千整体绕横梁中点旋转，ease-in-out 产生两端慢、底部快的钟摆节奏 */
+    .swing {
+      transform-origin: 200px 85px;
+      animation: pendulum 2.8s ease-in-out infinite alternate;
+    }
+    @keyframes pendulum {
+      from { transform: rotate(-32deg); }
+      to   { transform: rotate( 32deg); }
+    }
+    /* 小孩腿轻微前后摆动，增加生动感（相对座板） */
+    .leg-left, .leg-right {
+      transform-origin: 200px 275px;
+      animation: legKick 2.8s ease-in-out infinite alternate;
+    }
+    .leg-left  { animation-delay: 0s; }
+    .leg-right { animation-delay: 0.05s; }
+    @keyframes legKick {
+      from { transform: rotate(-8deg); }
+      to   { transform: rotate( 8deg); }
+    }
+  </style>
+</head>
+<body>
+  <h1>小孩荡秋千 · 单摆节奏</h1>
+  <div class="stage">
+    <svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+      <!-- 天空装饰：云 -->
+      <g fill="#fff" opacity="0.85">
+        <ellipse cx="70" cy="50" rx="28" ry="16"/>
+        <ellipse cx="95" cy="48" rx="22" ry="14"/>
+        <ellipse cx="55" cy="55" rx="18" ry="12"/>
+        <ellipse cx="310" cy="40" rx="30" ry="15"/>
+        <ellipse cx="340" cy="38" rx="24" ry="13"/>
+      </g>
+
+      <!-- 地面 -->
+      <rect x="0" y="355" width="400" height="45" fill="#5D4037"/>
+      <rect x="0" y="345" width="400" height="15" fill="#4CAF50"/>
+      <!-- 草地细节 -->
+      <g stroke="#388E3C" stroke-width="2" stroke-linecap="round">
+        <path d="M20 345 Q25 335 30 345"/>
+        <path d="M50 345 Q55 330 60 345"/>
+        <path d="M90 345 Q95 338 100 345"/>
+        <path d="M140 345 Q145 332 150 345"/>
+        <path d="M250 345 Q255 335 260 345"/>
+        <path d="M300 345 Q305 330 310 345"/>
+        <path d="M340 345 Q345 338 350 345"/>
+        <path d="M370 345 Q375 332 380 345"/>
+      </g>
+
+      <!-- 秋千架：左右立柱 + 横梁 -->
+      <g>
+        <!-- 左立柱 -->
+        <rect x="48" y="80" width="18" height="270" rx="3" fill="#6D4C41"/>
+        <rect x="52" y="80" width="6" height="270" fill="#8D6E63" opacity="0.4"/>
+        <!-- 右立柱 -->
+        <rect x="334" y="80" width="18" height="270" rx="3" fill="#6D4C41"/>
+        <rect x="338" y="80" width="6" height="270" fill="#8D6E63" opacity="0.4"/>
+        <!-- 横梁 -->
+        <rect x="40" y="72" width="320" height="18" rx="4" fill="#5D4037"/>
+        <rect x="40" y="72" width="320" height="6" rx="2" fill="#8D6E63" opacity="0.35"/>
+        <!-- 横梁两端装饰 -->
+        <circle cx="50" cy="81" r="8" fill="#4E342E"/>
+        <circle cx="350" cy="81" r="8" fill="#4E342E"/>
+      </g>
+
+      <!-- ========== 可摆动的秋千组 ========== -->
+      <g class="swing">
+        <!-- 两根绳（从上到下略微变细） -->
+        <line x1="145" y1="90" x2="145" y2="275" stroke="#5D4037" stroke-width="5" stroke-linecap="round"/>
+        <line x1="255" y1="90" x2="255" y2="275" stroke="#5D4037" stroke-width="5" stroke-linecap="round"/>
+        <!-- 绳的高光 -->
+        <line x1="143" y1="90" x2="143" y2="275" stroke="#A1887F" stroke-width="1.5" opacity="0.6"/>
+        <line x1="253" y1="90" x2="253" y2="275" stroke="#A1887F" stroke-width="1.5" opacity="0.6"/>
+
+        <!-- 座板 -->
+        <rect x="130" y="273" width="140" height="14" rx="4" fill="#A1887F"/>
+        <rect x="130" y="273" width="140" height="5" rx="2" fill="#D7CCC8" opacity="0.5"/>
+        <!-- 座板侧面厚度 -->
+        <path d="M130 287 L130 292 Q130 295 134 295 L266 295 Q270 295 270 292 L270 287 Z" fill="#8D6E63"/>
+
+        <!-- ===== 小孩 ===== -->
+        <!-- 腿（可轻微摆动） -->
+        <g class="leg-left">
+          <!-- 左大腿 + 小腿 -->
+          <path d="M175 280 Q165 300 160 320" stroke="#1565C0" stroke-width="12" stroke-linecap="round" fill="none"/>
+          <circle cx="160" cy="322" r="7" fill="#FFCC80"/> <!-- 脚 -->
+        </g>
+        <g class="leg-right">
+          <path d="M225 280 Q235 300 240 320" stroke="#1565C0" stroke-width="12" stroke-linecap="round" fill="none"/>
+          <circle cx="240" cy="322" r="7" fill="#FFCC80"/>
+        </g>
+
+        <!-- 身体（坐姿） -->
+        <!-- 裤子 -->
+        <ellipse cx="200" cy="278" rx="38" ry="14" fill="#1565C0"/>
+        <!-- 上衣 -->
+        <path d="M165 240 Q165 275 200 280 Q235 275 235 240 Q220 235 200 235 Q180 235 165 240 Z"
+              fill="#EF5350"/>
+        <!-- 衣领 -->
+        <path d="M185 238 Q200 245 215 238" stroke="#C62828" stroke-width="3" fill="none"/>
+
+        <!-- 手臂（抓住绳子） -->
+        <!-- 左臂 -->
+        <path d="M170 250 Q150 230 145 200" stroke="#FFCC80" stroke-width="10" stroke-linecap="round" fill="none"/>
+        <circle cx="145" cy="198" r="6" fill="#FFCC80"/> <!-- 手 -->
+        <!-- 右臂 -->
+        <path d="M230 250 Q250 230 255 200" stroke="#FFCC80" stroke-width="10" stroke-linecap="round" fill="none"/>
+        <circle cx="255" cy="198" r="6" fill="#FFCC80"/>
+
+        <!-- 头 -->
+        <circle cx="200" cy="205" r="26" fill="#FFCC80"/>
+        <!-- 头发 -->
+        <path d="M175 195 Q180 175 200 172 Q220 175 225 195 Q215 185 200 183 Q185 185 175 195"
+              fill="#5D4037"/>
+        <!-- 刘海 -->
+        <path d="M178 198 Q190 188 200 192 Q210 188 222 198" stroke="#5D4037" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+        <!-- 五官 -->
+        <!-- 眼睛 -->
+        <ellipse cx="190" cy="205" rx="4" ry="5" fill="#333"/>
+        <ellipse cx="210" cy="205" rx="4" ry="5" fill="#333"/>
+        <circle cx="191" cy="203" r="1.5" fill="#fff"/>
+        <circle cx="211" cy="203" r="1.5" fill="#fff"/>
+        <!-- 腮红 -->
+        <ellipse cx="180" cy="215" rx="6" ry="3.5" fill="#FF8A80" opacity="0.55"/>
+        <ellipse cx="220" cy="215" rx="6" ry="3.5" fill="#FF8A80" opacity="0.55"/>
+        <!-- 微笑 -->
+        <path d="M190 218 Q200 228 210 218" stroke="#E65100" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+        <!-- 衣角装饰小扣子 -->
+        <circle cx="200" cy="255" r="3" fill="#FFEB3B"/>
+        <circle cx="200" cy="268" r="3" fill="#FFEB3B"/>
+      </g>
+
+      <!-- 立柱顶部金属环装饰（在秋千组之外，固定） -->
+      <circle cx="145" cy="90" r="6" fill="#78909C" stroke="#455A64" stroke-width="2"/>
+      <circle cx="255" cy="90" r="6" fill="#78909C" stroke="#455A64" stroke-width="2"/>
+    </svg>
+  </div>
+  <p style="margin-top:14px; color:#546E7A; font-size:0.9rem;">
+    使用 CSS <code>ease-in-out</code> 模拟单摆「两端慢、中间快」的节奏
+  </p>
+</body>
+</html>
